@@ -61,6 +61,8 @@ Skips weak signals:
 
 ## 4. Architecture
 
+> Full Mermaid renderings live in `docs/architecture.md` (simple 30-second view + detailed flow + sequence + state machine). This section is the spec-level summary.
+
 ### Graph flow
 
 ```
@@ -68,39 +70,46 @@ Skips weak signals:
     ↓
 [PII Redact] ← middleware
     ↓
-[1. Classify Intent] → intent + confidence
+[Classify Intent] → intent + confidence + sentiment + risk_flags
     ↓
-[2. Retrieve Context] ← MCP filesystem
+[Retrieve Context] ── calls ──> [MCP READ Server]
     ↓
-[3. Draft Response] → draft + confidence
+[Draft Response] → draft + draft_confidence
     ↓
-[Decision Router]
-    ↓ needs approval?
-[INTERRUPT — wait for human]
-    ↓
-[Revalidate Context] ← check if stale
-    ↓
-[4. Send Response] ← MCP email, idempotent
-    ↓
-[5. Log Audit] ← append-only
-    ↓
-[End]
+[Policy Risk Check]  ◇  ── risk detected ──┐
+    ↓ no risk                              ↓
+[Confidence Check]   ◇  ── below 0.85 ─→ [Interrupt Gate]
+    ↓ above threshold                      ↓
+    ↓                                  [Approval UI] ── reject ─→ [Reject Check ◇]
+    ↓                                      ↓ approve/edit         ↓ count<3 → loop to Draft
+    ↓                                  [Elapsed > 15min? ◇]       ↓ count≥3 → [Manual Queue]
+    ↓                                      ↓ yes
+    ↓                                  [Revalidate context_hash ◇]
+    ↓                                      ↓ hash changed
+    ↓                                  [Summarize Changes] → delta panel → back to Approval UI
+    ↓                                      ↓ hash unchanged
+    └──────────────────────────────────────┴──→ [Finalize Action] (PII restore + payload)
+                                                       ↓
+                                          [Send Response] ── calls ──> [MCP WRITE Server]
+                                                       ↓ idempotent on send_idempotency_key
+                                          [Append-only audit log + trace metadata]
+                                                       ↓
+                                                     [End]
 ```
 
-### Routing rules
+### Routing rules — two sequential gates, not one fuzzy router
 
-Auto-send if ALL true:
-- Confidence > 0.85
-- Not refund-related
-- No angry sentiment
-- Intent in safe list (FAQ, info, basic technical)
-
-Human approval if ANY true:
-- Refund/money mentioned
+**Gate 1 — Policy Risk Check.** Escalate if **any** true:
+- Refund or money mention
 - Angry sentiment
-- Confidence < 0.85
-- Edge case intent
-- Policy-sensitive
+- Edge-case intent
+- Explicit policy match (cancellation, billing dispute, account recovery, legal)
+
+**Gate 2 — Confidence Check** (only runs if Gate 1 passes). Escalate if `intent_confidence < 0.85` OR `draft_confidence < 0.85`.
+
+**Auto-send** only when both gates pass AND `intent in {FAQ, info, basic_technical}`.
+
+**Primary safety metric:** `false_auto_send_rate = 0%`
 
 ---
 
@@ -110,14 +119,13 @@ Human approval if ANY true:
 class AgentState(TypedDict):
     # Identity
     ticket_id: str
-    thread_id: str
-    idempotency_key: str
-    graph_version: str
+    thread_id: str                       # equals ticket_id (stable resume pointer)
+    graph_version: str                   # v1/v2/v3
 
     # Input
     customer_message: str
     customer_history: list
-    context_hash: str
+    context_hash: str                    # hash of retrieved_context for stale-check
 
     # Classification
     intent: str
@@ -132,20 +140,33 @@ class AgentState(TypedDict):
 
     # Approval
     requires_approval: bool
-    approval_status: str  # pending/approved/edited/rejected/expired
+    approval_status: str                 # pending/approved/edited/rejected/expired/cancelled/superseded
     approver_id: str
     approval_timestamp: str
-    sla_deadline: str
+    sla_deadline: datetime
+
+    # Idempotency on send
+    send_idempotency_key: str            # set once at entry; used by Send to deduplicate retries
+    sent_message_id: Optional[str]       # populated after MCP returns; presence == "already sent"
 
     # Execution
-    send_status: str  # pending/in_flight/sent/failed
+    send_status: str                     # pending/in_flight/sent/failed_retryable/failed_manual
+
+    # Loop guards (prevent infinite retries / rejections)
+    human_rejection_count: int           # increments on each rejection; >= 3 routes to manual_queue
+    send_retry_count: int                # increments on each transient send failure; >= 3 routes to failed_manual
+
+    # Long-pause edge cases
+    ticket_external_status: str          # open / closed_by_customer / superseded
 
     # Terminal
-    final_state: str  # sent/expired/failed_retryable/failed_manual
+    final_state: str                     # sent/rejected/expired/cancelled/superseded/failed_manual
 
-    # Audit
-    audit_log: list  # append-only
-    cost_breakdown: dict
+    # Audit + observability
+    audit_log: list                      # append-only
+    cost_breakdown: dict                 # {classify: 0.0001, draft: 0.0008, ...}
+    total_tokens: int
+    total_cost_usd: float
     trace_url: str
 ```
 
@@ -158,111 +179,216 @@ class AgentState(TypedDict):
 - Runs before any LLM call
 - Redacts: emails, credit card numbers, phone numbers
 - Replaces with tokens: `[EMAIL_1]`, `[CC_1]`
-- Restores in final response
+- Restoration happens in **Finalize Action** before send
 
-### 1. Classify Intent
+### Classify Intent
 
 - Input: customer message
-- Output: intent label + confidence score
+- Output: intent label + confidence + sentiment + risk_flags
 - LLM call via OpenRouter
 - Intents: refund, technical, billing, complaint, FAQ, other
-- Also extracts: sentiment, risk flags
 
-### 2. Retrieve Context
+### Retrieve Context
 
-- Calls MCP server: `get_customer_history`, `get_kb_article`
-- Returns: past tickets, relevant policy docs
-- Stores context hash for stale-check later
+- Calls MCP **READ** server only (`get_customer_history`, `get_kb_article`)
+- Returns: past tickets, relevant policy docs (with KB sentence quotes for justification)
+- Stores `context_hash` for stale-check later
 
-### 3. Draft Response
+### Draft Response
 
 - Input: ticket + classified intent + retrieved context
-- Output: draft response + confidence score
+- Output: draft response + `draft_confidence`
 - LLM call with policy grounding
 - Draft saved as `original_draft`
 
-### Decision Router
+### Policy Risk Check (Gate 1)
 
-- Conditional edge based on routing rules above
-- Routes to: auto-send OR interrupt
+- Conditional edge — fast deterministic check
+- Escalates if any: refund/money, angry, edge-case intent, policy match
+- If risk → Interrupt Gate (skip Gate 2)
+- If no risk → Confidence Check
+
+### Confidence Check (Gate 2)
+
+- Only runs if Gate 1 passes
+- Escalates if `intent_confidence < 0.85` OR `draft_confidence < 0.85`
+- Above threshold → Finalize Action (auto-send path)
+- Below threshold → Interrupt Gate
 
 ### Interrupt Gate
 
-- Uses LangGraph `interrupt_before`
-- Saves checkpoint
-- Waits for external approval signal
-- Resumes via `Command(resume=...)`
+- Uses LangGraph `interrupt()` — **dedicated node, no side effects** (see §6.5)
+- LangGraph checkpointer persists state at super-step boundaries; this node just pauses execution
+- Resumes via `Command(resume=...)` from FastAPI approval endpoint
+
+### Approval UI
+
+- Renders the approval form (see §7 for layout)
+- Three actions: Approve / Edit & Approve / Reject
+- On reject → Reject Check (count-bounded; see below)
+- On approve/edit → Elapsed Check
+
+### Reject Check
+
+- Conditional edge on `human_rejection_count`
+- If `count < 3` → loop back to Draft Response (increments count, re-drafts with rejection feedback)
+- If `count >= 3` → Manual Queue (terminal)
+
+### Elapsed Check
+
+- Conditional edge on `(now - approval_request_time) > 15 min`
+- If no → Finalize Action (skip revalidation)
+- If yes → Revalidate Context
 
 ### Revalidate Context
 
-- Runs ONLY if approval took >15 minutes
-- Re-fetches customer context
-- Compares to original `context_hash`
-- If changed → re-route to drafter
-- If same → proceed to send
+- Re-fetches customer context via MCP READ server
+- Compares fresh hash to stored `context_hash`
+- If unchanged → Finalize Action
+- If changed → Summarize Changes
 
-### 4. Send Response
+### Summarize Changes
 
-- Idempotent — checks `send_status` before action
-- Calls MCP server: `send_email`
-- Updates `send_status`: pending → in_flight → sent
-- Retries on transient failures
+- LLM call: compute delta between original context and fresh context
+- Produces structured delta (e.g., `account_status: Active → Pending`)
+- Routes back to Approval UI with the delta panel above the draft
+- Human re-decides Approve/Edit/Reject with full information
 
-### 5. Log Audit
+### Finalize Action
 
-- Append-only entry
-- Records: timestamp, node, decision, model, cost, trace_url
-- Includes both `original_draft` and `final_draft` if edited
+- **Pure compose step — no irreversible effects yet**
+- Restores PII tokens (`[EMAIL_1]` → real email)
+- Assembles final payload (recipient, subject, body, idempotency key)
+- Hands off to Send Response
+
+### Send Response
+
+- Calls MCP **WRITE** server only (`send_email`)
+- Idempotent on `send_idempotency_key` — re-running the graph cannot double-send
+- `send_status`: pending → in_flight → sent
+- Transient failures retry up to 3 times; after that → `failed_manual` → Manual Queue
+
+### Log Audit
+
+- Append-only entry to audit log
+- Records: timestamp, node, decision, model, cost, tokens, trace_url
+- Saves both `original_draft` and `final_draft` when human edited
+- Includes the KB justification used for escalation (when applicable)
+
+### Manual Queue (terminal)
+
+- Receives tickets from: rejection-count exceeded, SLA expired, send retries exhausted
+- Customer is notified that their ticket is being handled by a human
+- Audit entry logged before terminal exit
+
+---
+
+## 6.5 Implementation Rules (LangGraph-specific)
+
+These two rules prevent the most common bugs when implementing HITL on LangGraph. **Not optional — getting either wrong silently breaks the agent.**
+
+### Rule 1 — `interrupt()` lives in its own dedicated node
+
+The `interrupt()` call must be alone in its node. No DB writes, MCP calls, audit log entries, or any other side effect can share the node.
+
+**Why:** When LangGraph resumes after `interrupt()`, the node containing the call restarts from the beginning. Any code before the interrupt runs again on every resume — side effects in that node duplicate.
+
+**Pattern:** Put side effects in *downstream* nodes that run exactly once per resume. The interrupt node does only the pause.
+
+### Rule 2 — Never wrap `interrupt()` in `try/except`
+
+`interrupt()` works by raising a special exception that the LangGraph runtime catches. A broad `try/except` swallows the exception; the graph either hangs or skips the pause entirely.
+
+**Why:** Generic "robust error handling" patterns break HITL. It's tempting to wrap everything for safety, but the interrupt path must bubble up to the runtime.
+
+**Pattern:** Error handling lives in *other* nodes, not the interrupt node.
 
 ---
 
 ## 7. HITL Design
 
-### Approval UI shows
+The UI is built so a human can decide in ~10 seconds, not 2 minutes.
 
-- Customer message + thread history
-- Detected intent + confidence
-- Risk flags + which rule triggered
-- Draft response (editable)
-- Policy excerpt that triggered escalation
-- Three actions: Approve / Edit & Approve / Reject
+### Approval UI layout
+
+1. **Customer message + thread history**
+2. **Why I paused** — risk breakdown panel:
+   ```
+   refund_detected:  true
+   sentiment:        angry (0.91)
+   intent_conf:      0.72  (below 0.85 threshold)
+   draft_conf:       0.81  (below 0.85 threshold)
+   policy_match:     refund_over_$100
+
+   Justification (from KB):
+   "Refunds above $100 require manager approval per Policy 4.2.1"
+   ```
+   The justification quote is pulled from `retrieved_context` — the exact KB sentence the agent matched against. This is what makes the surface explainable rather than "trust me."
+3. **Detected intent + confidence**
+4. **Draft response** (editable text area)
+5. **Three actions:** Approve · Edit & Approve · Reject
+
+### Stale-context delta panel (only if context changed during pause)
+
+When `Revalidate` detects `context_hash` changed, the UI re-renders with an extra panel above the draft:
+
+```
+Context changed since this draft was created (2h 14min ago):
+  - account_status:  Active  →  Pending
+  - open_tickets:    1       →  3
+```
+
+Human re-decides with the new information.
 
 ### Long wait handling
 
-- State persisted in SQLite checkpointer
-- SLA deadline stored in state
-- Default SLA: 24 hours
+- State persisted by SQLite checkpointer at every super-step boundary
+- `sla_deadline` stored in state (default 24h)
+- If SLA expires with no human response → Manual Queue
 
-### If approval never comes
+### Bounded rejections
 
-- Low risk → auto-close, log event
-- Medium risk → escalate to backup queue
-- High risk → hold indefinitely, manual review only
+- `human_rejection_count` increments on each Reject click
+- If `count < 3` → re-draft with rejection feedback, return to Approval UI
+- If `count >= 3` → Manual Queue (prevents infinite redraft loops)
 
 ### Approve-with-edits
 
-- Human edits draft in UI
-- Both `original_draft` and `final_draft` saved
-- Audit log shows both versions
+- Human edits draft in UI before approving
+- Both `original_draft` and `final_draft` saved to append-only audit log
+- Audit log shows both versions for review and as future fine-tuning data
 
 ---
 
 ## 8. MCP Integration
 
-Build ONE custom MCP server. Exposes 3 tools:
+Build **TWO** custom MCP servers — split read vs write for least-privilege isolation:
 
+### MCP READ Server (`support_read.py`)
 - `get_customer_history(customer_id)` → past tickets
-- `get_kb_article(query)` → policy/KB docs
-- `send_email(to, subject, body)` → mock send
+- `get_kb_article(query)` → policy/KB docs (returns full sentence quotes for justification)
 
-Why custom MCP server:
+Connected to: **Retrieve Context** node and **Revalidate Context** node only.
+
+### MCP WRITE Server (`support_write.py`)
+- `send_email(to, subject, body, idempotency_key)` → mock send
+
+Connected to: **Send Response** node only.
+
+### Why split read vs write
+
+- **Prompt-injection defense.** If a malicious customer message smuggles instructions through the retrieved context, the agent at retrieval time has no path to `send_email`. A jailbreak during Retrieve cannot exfiltrate or send anything.
+- **Audit clarity.** Read calls are noisy and frequent; write calls are rare and high-stakes. Separating them makes the write log trivially auditable.
+- **2027 hiring signal.** Least-privilege at the tool layer is a real production pattern that most portfolio HITL projects skip.
+
+### Why custom MCP servers (vs hardcoded SDK calls)
+
 - Shows you can BUILD MCP, not just consume
-- Bigger differentiator than using existing MCP
-- 17% of agent jobs already require MCP (April 2026 data)
-- Trending up for 2027
+- 17% of agent jobs already require MCP (April 2026 data); trending up for 2027
+- Splitting into two servers shows MCP composition, not just single-server usage
 
 README line:
-> "Tools integrated via Model Context Protocol (MCP) — production pattern, not hardcoded SDK calls. Custom MCP server included in repo."
+> "Tools integrated via Model Context Protocol (MCP) — split into read and write servers for least-privilege isolation against prompt injection. Production pattern, not hardcoded SDK calls."
 
 ---
 
@@ -271,8 +397,18 @@ README line:
 ### Setup
 
 - Tracing enabled via env var
-- Every run tagged with `graph_version: v1/v2/v3`
 - Public trace links in README
+- Every trace tagged with the full set below for failure-slice analysis:
+
+| Tag | Values |
+|---|---|
+| `graph_version` | `v1` / `v2` / `v3` |
+| `intent` | `refund` / `billing` / `technical` / `complaint` / `FAQ` / `other` |
+| `outcome` | `auto_send` / `escalated` |
+| `human_edited` | `true` / `false` |
+| `final_state` | `sent` / `rejected` / `expired` / `cancelled` / `superseded` / `failed_manual` |
+| `risk_flags` | comma-joined list (e.g., `refund,angry`) |
+| `confidence_bucket` | `lt_0.5` / `0.5-0.85` / `gte_0.85` |
 
 ### Required evaluators
 
@@ -337,7 +473,8 @@ support-agent/
 ├── data/
 │   └── bitext_sample.csv
 ├── mcp_server/
-│   └── support_tools.py        # Custom MCP server
+│   ├── support_read.py         # MCP READ server: get_customer_history, get_kb_article
+│   └── support_write.py        # MCP WRITE server: send_email (least-privilege isolation)
 ├── src/
 │   ├── graph.py                # LangGraph workflow
 │   ├── nodes.py                # Node functions
@@ -534,16 +671,20 @@ Never ship with these:
 
 Things most portfolios won't have:
 
-1. **Custom MCP server** (not just consuming)
-2. **False auto-send rate** as primary safety metric
-3. **Approve-with-edits** flow with version history
-4. **Stale state revalidation** after long approval wait
-5. **PII masking middleware** before LLM calls
-6. **Public LangSmith trace links** in README
-7. **Failure slice analysis** (not just overall accuracy)
-8. **Kill-server-resume** demo recorded
+1. **Custom MCP servers, split read vs write** (least-privilege defense against prompt injection)
+2. **Two-gate routing** — separate Policy Risk and Confidence checks, not one fuzzy router
+3. **False auto-send rate** as primary safety metric
+4. **Approve-with-edits** flow with version history (both drafts in audit log)
+5. **Stale state revalidation** with delta panel — human re-decides on context change, not silent redraft
+6. **Bounded rejection loop** (3-strike rule routes to Manual Queue)
+7. **Idempotent send** with explicit `send_idempotency_key` — survives retries and resumes
+8. **PII masking middleware** with explicit Finalize-Action restoration
+9. **KB justification quote** in Approval UI — explainable AI, not "trust me"
+10. **Public LangSmith trace links** with full tag set for failure-slice analysis
+11. **Kill-server-resume** demo recorded
+12. **Implementation Rules** documented (interrupt() in dedicated node, no try/except)
 
-Most projects skip all 8. Hit even 5 and you're top 5%.
+Most projects skip nearly all of these. Hit 7+ and you're top 1–3%.
 
 ---
 
@@ -568,15 +709,20 @@ Document these as "future work" in README.
 
 Project is "done" when:
 
-- All 5 nodes work end-to-end
-- Custom MCP server runs and is called by graph
-- Approval UI works
+- All graph nodes work end-to-end (PII Redact → Classify → Retrieve → Draft → Policy Gate → Confidence Gate → Interrupt → UI → Reject Check → Elapsed Check → Revalidate → Summarize Changes → Finalize → Send → Audit)
+- **Both** MCP servers (read + write) run and are called by the correct nodes
+- Approval UI shows the "Why I paused" panel with KB justification quote
+- Stale-context delta panel renders when `context_hash` changes during pause
+- Implementation Rules followed (interrupt() in dedicated node, no try/except wrapping)
+- Bounded rejection loop verified (3-strike → Manual Queue)
+- Idempotent send verified (re-running graph cannot double-send)
 - Kill-server-resume demo recorded
-- Approve-with-edits demo recorded
+- Approve-with-edits demo recorded (both drafts in audit log)
+- SLA timeout demo recorded (auto-escalate to Manual Queue)
 - 5 evaluators run on 50-ticket dataset
 - v1 → v2 → v3 metrics table populated with REAL numbers
 - README complete with all sections
-- Public LangSmith trace links in README
+- Public LangSmith trace links with full tag set in README
 - 2-min demo video uploaded
 - GitHub repo public
 - 5+ specific failure modes documented honestly
