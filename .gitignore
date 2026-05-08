@@ -147,6 +147,9 @@ activemq-data/
 # SageMath parsed files
 *.sage.py
 
+# Claude Code local settings (machine-specific)
+.claude/settings.local.json
+
 # Environments
 .env
 .envrc
