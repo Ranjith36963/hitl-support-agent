@@ -17,7 +17,7 @@
 
 ## Communication style (non-negotiable)
 
-- **Reply in bullet points, not paragraphs.** Lead with status: what's done · what's broken · what's blocked · what's next. Five tight bullets beat three dense paragraphs.
+- **Bullet points only.** No paragraphs. Lead with status: what's done · what's broken · what's blocked · what's next.
 - **Plain language.** Skip unexplained jargon and command syntax inside explanations unless the user asks. Keep grammar correct, cut filler.
 
 ## What we're building
