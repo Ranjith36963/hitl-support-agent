@@ -803,8 +803,9 @@ List 5-7 specific failures + fixes.
 
 ## What I'd build next
 Postgres for production.
-Slack approval channel.
+Microsoft Teams support (Adaptive Cards) for orgs not on Slack.
 Online evals on live traffic.
+Webhook-based inbound (SES / SendGrid Parse) replacing IMAP IDLE.
 
 ## Run locally
 3 commands.

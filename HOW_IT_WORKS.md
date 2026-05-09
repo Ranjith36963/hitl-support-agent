@@ -131,7 +131,7 @@ Sarah is on duty. She glances at the message in `#support-refunds`. The "Why I p
 
 > **11b. Edit.** Sarah clicks Edit. The Slack Write Server uses `views.open` to pop a Slack modal (no redirect to a separate web page — Sarah stays in Slack). The modal is prefilled with the draft. She rewrites a sentence — adds an apology — and saves. Both `original_draft` AND `final_draft` go into state. `Command(resume="edit")`. Slack updates: *"✏️ Edited & approved by @sarah · 47 sec."*
 
-> **11c. Reject.** Sarah clicks Reject. A small modal pops: *"Why? (optional)"*. She types: "Tone too formal — make it friendlier." This becomes `rejection_reason` in state. Agent checks `human_rejection_count`. Below 3 → loops back to Step 6 (Draft Response). The redraft prompt now includes Sarah's reason as additional context. `human_rejection_count++`. The new draft posts as a Slack thread reply on the same original message — preserves the team's audit history. At 3 → ticket goes to **Manual Queue**, posts *"🚦 3 rejections — manual queue"* in the channel, customer notified by email, Sarah's team owns it end-to-end from there.
+> **11c. Reject.** Sarah clicks Reject. A small modal pops: *"Why? (optional)"*. She types: "Tone too formal — make it friendlier." This becomes `rejection_reason` in state. Agent checks `human_rejection_count`. Below 3 → the *same LangGraph thread* re-enters the Draft node (it doesn't start a new thread — `thread_id` and all prior state stay intact, just `rejection_reason` and `human_rejection_count++` are added). The Draft node reads `rejection_reason` and incorporates it into the redraft prompt as additional context. The new draft posts as a Slack thread reply on the same original message — preserves the team's audit history visible at a glance. At 3 → ticket goes to **Manual Queue**, posts *"🚦 3 rejections — manual queue"* in the channel, customer notified by email, Sarah's team owns it end-to-end from there.
 
 For Jamie's ticket, assume Sarah clicks **Approve**.
 
@@ -241,7 +241,7 @@ Jamie still gets a reply via real email, threaded under her original. She's stil
 | **LLM / observability** | OpenRouter (DeepSeek), LangSmith tracing | — |
 | **Orchestration** | LangGraph + SQLite checkpointer | — |
 | **Tools** | Three capability-split MCP servers (Read / Email Write / Slack Write) | — |
-| **Eval data** | Real Bitext Customer Support dataset | — |
+| **Eval data** | Bitext Customer Support dataset (public, intent-labeled, 27 intents — commonly used as a customer-support benchmark) | — |
 | **Customer database** | — | `data/customers_seed.json` (Salesforce-shape) |
 | **CRM profiles** | — | Mock `get_crm_profile` returns shaped data |
 | **Policy corpus** | — | `data/acme_policies.md` (fictional ACME SaaS Co) |

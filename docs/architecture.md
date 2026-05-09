@@ -367,7 +367,7 @@ total_cost_usd: float
 
 # Long-pause edge cases
 ticket_external_status: str          # open / closed_by_customer / superseded
-sla_deadline: datetime
+sla_deadline: datetime               # SLA expiry; once passed without a human decision → manual_queue
 
 # Loop guards
 human_rejection_count: int           # increments on each rejection; >= 3 routes to manual_queue
