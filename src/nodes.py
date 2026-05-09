@@ -45,7 +45,22 @@ from src.mcp_client import (
     SlackPostParams,
     SlackUpdateParams,
 )
-from src.pii import redact, restore
+from src.pii import (
+    clear_ticket as _pii_clear_ticket,
+)
+from src.pii import (
+    get_envelope_from as _pii_envelope_from,
+)
+from src.pii import (
+    get_token_map as _pii_get_token_map,
+)
+from src.pii import (
+    redact,
+    restore,
+)
+from src.pii import (
+    store_token_map as _pii_store_token_map,
+)
 from src.policy import gate_one_policy_risk, should_auto_send
 from src.slack_router import route_channel
 from src.state import AgentState
@@ -120,6 +135,11 @@ def _build_approval_blocks(state: AgentState, kb_quote: str) -> list[dict[str, A
     if sentiment:
         why_lines.append(f"• sentiment: `{sentiment}`")
 
+    # Recipient address shown to the human reviewer so they can spot
+    # spoofed-From attempts before approving. Read from the trustworthy
+    # envelope-from in the pii vault, NOT from the spoofable From: header.
+    recipient = _customer_email_from_audit(state)
+
     blocks: list[dict[str, Any]] = [
         {
             "type": "header",
@@ -133,6 +153,7 @@ def _build_approval_blocks(state: AgentState, kb_quote: str) -> list[dict[str, A
             "fields": [
                 {"type": "mrkdwn", "text": f"*Tier*\n{customer_tier}"},
                 {"type": "mrkdwn", "text": f"*Intent*\n{intent} ({intent_conf:.2f})"},
+                {"type": "mrkdwn", "text": f"*Reply will go to*\n`{recipient}`"},
             ],
         },
         {
@@ -187,14 +208,22 @@ def _build_approval_blocks(state: AgentState, kb_quote: str) -> list[dict[str, A
 
 
 def pii_redact_node(state: AgentState) -> dict[str, Any]:
+    """Redact PII before any LLM call.
+
+    The token_map (real PII) is stored in the ephemeral pii vault keyed
+    by ticket_id — NOT in audit_log. audit_log is checkpointed to SQLite
+    and emitted to LangSmith; storing real emails / phones / CCs there
+    would violate the "LLM never sees real PII" invariant in spirit.
+    The audit entry records only token_count for observability.
+    """
     redacted, token_map = redact(state["customer_message"])
+    ticket_id = state.get("ticket_id", "")
+    if ticket_id:
+        _pii_store_token_map(ticket_id, token_map)
     return {
         "customer_message": redacted,
-        # Hide the token map inside audit_log entry — restoration uses it
-        # at Finalize time. Not a top-level state field because it's not
-        # supposed to leave the process.
         "audit_log": (state.get("audit_log") or [])
-        + [_audit(state, "pii_redact", token_count=len(token_map), token_map=token_map)],
+        + [_audit(state, "pii_redact", token_count=len(token_map))],
     }
 
 
@@ -266,14 +295,38 @@ async def enrich_context_node(state: AgentState) -> dict[str, Any]:
 def _customer_email_from_audit(state: AgentState) -> str:
     """Recover the customer email after PII redact replaced it.
 
-    The PII redact node stored the token map in its audit entry; we look up
-    [EMAIL_1] in the most recent entry. If absent, fall back to a sentinel
-    that the MCP read server's mock can still resolve.
+    Two-tier lookup, trustworthy first:
+      1. SMTP envelope-from in the pii vault (captured from Return-Path
+         by email_listener — NOT spoofable by message content).
+      2. First [EMAIL_*] in the redacted token_map (matches whatever
+         the From: header said — spoofable; only used when envelope is
+         absent, e.g., test fixtures or non-IMAP entry points).
+
+    Returns 'unknown@example.com' if neither path resolves — this sentinel
+    address means the recipient is unknown; downstream Send Email MUST
+    refuse rather than silently substituting it. (Audit caller should fail
+    closed.)
+
+    Compatibility shim: legacy state where token_map was stored inline in
+    the audit_log entry still resolves correctly so checkpoints persisted
+    before this fix continue to work after the upgrade.
     """
+    ticket_id = state.get("ticket_id", "")
+    # Tier 1: trustworthy envelope-from
+    if ticket_id:
+        envelope = _pii_envelope_from(ticket_id)
+        if envelope:
+            return envelope
+        tm = _pii_get_token_map(ticket_id)
+        for token, original in tm.items():
+            if token.startswith("[EMAIL_"):
+                return original
+    # Tier 2: legacy compatibility — read from audit_log if vault is empty
+    # (covers checkpointed state from before this fix).
     for entry in reversed(state.get("audit_log") or []):
         if entry.get("node") == "pii_redact":
-            tm = entry.get("token_map") or {}
-            for token, original in tm.items():
+            tm_legacy = entry.get("token_map") or {}
+            for token, original in tm_legacy.items():
                 if token.startswith("[EMAIL_"):
                     return original
     return "unknown@example.com"
@@ -413,7 +466,13 @@ async def slack_notification_node(state: AgentState) -> dict[str, Any]:
                 state,
                 "slack_notification",
                 channel=result.channel,
-                ts=result.slack_message_ts,
+                # NOTE: kwarg renamed from `ts` to `slack_ts` — `_audit` builds
+                # `{"ts": _now_iso(), **fields}` so passing `ts=` overwrites the
+                # ISO 8601 wall-clock with the Slack unix-epoch string. That
+                # silently broke `route_after_action`'s elapsed-time check
+                # (datetime.fromisoformat raised ValueError, swallowed by a
+                # bare except, always routed to "finalize"). Audit finding H1.
+                slack_ts=result.slack_message_ts,
             )
         ],
     }
@@ -590,12 +649,22 @@ async def summarize_changes_node(state: AgentState) -> dict[str, Any]:
 
 
 def finalize_action_node(state: AgentState) -> dict[str, Any]:
-    # Recover the token map from the pii_redact audit entry.
+    """Restore PII tokens to their real values before SMTP send.
+
+    Token map source order:
+      1. Ephemeral pii vault (canonical, populated by pii_redact_node)
+      2. audit_log entry (legacy compat for checkpoints written before vault landed)
+    """
+    ticket_id = state.get("ticket_id", "")
     token_map: dict[str, str] = {}
-    for entry in state.get("audit_log") or []:
-        if entry.get("node") == "pii_redact":
-            token_map = entry.get("token_map") or {}
-            break
+    if ticket_id:
+        token_map = _pii_get_token_map(ticket_id)
+    if not token_map:
+        # Legacy fallback for state checkpointed before the vault refactor.
+        for entry in state.get("audit_log") or []:
+            if entry.get("node") == "pii_redact":
+                token_map = entry.get("token_map") or {}
+                break
 
     final_with_pii = restore(state.get("final_draft", ""), token_map)
     return {
@@ -620,8 +689,28 @@ async def send_email_node(state: AgentState) -> dict[str, Any]:
             + [_audit(state, "send_email", skipped="already_sent_state")],
         }
 
-    client = _client()
+    # Fail closed on unresolved recipient BEFORE touching the MCP client —
+    # the sentinel value means we could not derive a trustworthy address
+    # from the SMTP envelope or the redacted token map. Refusing to send
+    # beats sending to a stranger, AND skipping the client lookup keeps
+    # this branch testable without a live MCP router subprocess.
     customer_email = _customer_email_from_audit(state)
+    if customer_email in ("unknown@example.com", "", None):
+        return {
+            "send_status": "failed_manual",
+            "final_state": "failed_manual",
+            "audit_log": (state.get("audit_log") or [])
+            + [
+                _audit(
+                    state,
+                    "send_email",
+                    skipped="unknown_recipient",
+                    reason="No trustworthy envelope-from or redacted address resolved.",
+                )
+            ],
+        }
+
+    client = _client()
     subject = "Re: " + _subject_from_state(state)
 
     try:
@@ -697,7 +786,11 @@ def route_after_send(state: AgentState) -> str:
 
 
 async def audit_log_node(state: AgentState) -> dict[str, Any]:
-    """Final close-out. Append-only audit entry + best-effort Slack update."""
+    """Final close-out. Append-only audit entry + best-effort Slack update.
+
+    Clears PII vault entry for this ticket — the token map and envelope-from
+    have done their job, no reason to keep real PII in process memory.
+    """
     if state.get("slack_message_ts") and state.get("slack_channel"):
         try:
             client = _client()
@@ -717,6 +810,11 @@ async def audit_log_node(state: AgentState) -> dict[str, Any]:
             )
         except Exception:
             pass  # best-effort — not blocking the audit close
+
+    ticket_id = state.get("ticket_id", "")
+    if ticket_id:
+        _pii_clear_ticket(ticket_id)
+
     return {
         "final_state": state.get("final_state") or "sent",
         "audit_log": (state.get("audit_log") or []) + [_audit(state, "audit_close")],
@@ -753,6 +851,11 @@ async def manual_queue_node(state: AgentState) -> dict[str, Any]:
             )
         except Exception:
             pass
+
+    ticket_id = state.get("ticket_id", "")
+    if ticket_id:
+        _pii_clear_ticket(ticket_id)
+
     return {
         "final_state": terminal,
         "audit_log": (state.get("audit_log") or []) + [_audit(state, "manual_queue", terminal=terminal)],

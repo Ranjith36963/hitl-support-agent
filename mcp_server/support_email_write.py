@@ -25,14 +25,13 @@ Run standalone (stdio):
 
 from __future__ import annotations
 
-import asyncio
 import email.utils
 import logging
 import os
 import pathlib
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.message import EmailMessage
 from typing import Any
 
@@ -72,8 +71,18 @@ async def _ensure_idem_schema() -> None:
         await db.commit()
 
 
+# Sentinel value stored in `sent_message_id` between reservation and SMTP
+# completion. Concurrent callers seeing this value know a peer is mid-send
+# and must NOT call SMTP themselves.
+_RESERVED_SENTINEL = "__RESERVED__"
+
+
 async def _lookup_sent(idempotency_key: str) -> str | None:
-    """Return sent_message_id if already sent, else None."""
+    """Return sent_message_id if already sent, else None.
+
+    May return the `__RESERVED__` sentinel — caller is responsible for
+    distinguishing "completed" from "in-flight" results.
+    """
     async with aiosqlite.connect(_IDEM_DB_PATH) as db:
         async with db.execute(
             "SELECT sent_message_id FROM sent_emails WHERE idempotency_key = ?",
@@ -83,15 +92,59 @@ async def _lookup_sent(idempotency_key: str) -> str | None:
     return row[0] if row else None
 
 
-async def _record_sent(idempotency_key: str, sent_message_id: str) -> None:
-    """Persist sent_message_id for this idempotency_key."""
+async def _try_reserve(idempotency_key: str) -> bool:
+    """Atomic reserve-or-bail.
+
+    Returns True if THIS caller acquired the reservation (proceeds to SMTP).
+    Returns False if the row already existed (caller is a duplicate or
+    racing peer — must NOT call SMTP).
+
+    The check-and-insert is a single SQL statement that SQLite executes
+    atomically: `INSERT OR IGNORE` is a constraint-fail-tolerant insert,
+    and `cursor.rowcount` reflects whether the row was newly inserted.
+    No window where two concurrent callers can both pass.
+    """
     async with aiosqlite.connect(_IDEM_DB_PATH) as db:
-        await db.execute(
+        cursor = await db.execute(
             """
             INSERT OR IGNORE INTO sent_emails (idempotency_key, sent_message_id, sent_at)
             VALUES (?, ?, ?)
             """,
-            (idempotency_key, sent_message_id, datetime.now(timezone.utc).isoformat()),
+            (
+                idempotency_key,
+                _RESERVED_SENTINEL,
+                datetime.now(UTC).isoformat(),
+            ),
+        )
+        await db.commit()
+        return cursor.rowcount == 1  # 1 = we inserted, 0 = key existed
+
+
+async def _commit_sent(idempotency_key: str, sent_message_id: str) -> None:
+    """Replace the reservation sentinel with the real sent Message-ID.
+
+    Called after SMTP succeeds. UPDATE is unconditional because we only
+    reach this path when `_try_reserve` returned True — the row exists
+    and holds our reservation.
+    """
+    async with aiosqlite.connect(_IDEM_DB_PATH) as db:
+        await db.execute(
+            "UPDATE sent_emails SET sent_message_id = ? WHERE idempotency_key = ?",
+            (sent_message_id, idempotency_key),
+        )
+        await db.commit()
+
+
+async def _release_reservation(idempotency_key: str) -> None:
+    """Drop a reservation row so retries after SMTP failure can re-attempt.
+
+    Called when SMTP raises before completion. Without this, a transient
+    SMTP failure would permanently block retry of the same idempotency_key.
+    """
+    async with aiosqlite.connect(_IDEM_DB_PATH) as db:
+        await db.execute(
+            "DELETE FROM sent_emails WHERE idempotency_key = ? AND sent_message_id = ?",
+            (idempotency_key, _RESERVED_SENTINEL),
         )
         await db.commit()
 
@@ -202,21 +255,42 @@ async def send_email(
     """
     await _ensure_idem_schema()
 
-    # --- App-layer idempotency check ---
-    cached = await _lookup_sent(idempotency_key)
-    if cached:
+    # --- Atomic reserve-or-bail (closes audit finding H2) ---
+    # `_try_reserve` is a single INSERT OR IGNORE — atomic at the SQLite
+    # level. Concurrent callers cannot both pass; exactly one wins. Replaces
+    # the previous lookup→SMTP→record pattern that had a check-then-act
+    # window where two retries with the same idempotency_key could both
+    # call SMTP and the customer would receive duplicate replies.
+    we_won_reservation = await _try_reserve(idempotency_key)
+    if not we_won_reservation:
+        # Row already exists — either a completed prior send OR a
+        # concurrent peer mid-send.
+        existing = await _lookup_sent(idempotency_key)
+        if existing == _RESERVED_SENTINEL:
+            # Concurrent send in flight on a peer process. Do NOT call
+            # SMTP. Surface a clear status so LangGraph's retry logic
+            # can wait and re-poll rather than racing.
+            logger.warning(
+                "send_email: concurrent in-flight reservation for key=%s",
+                idempotency_key,
+            )
+            return {
+                "sent_message_id": "",
+                "was_duplicate": True,
+                "status": "concurrent_in_flight",
+            }
         logger.info(
             "send_email: duplicate detected for key=%s; returning cached id=%s",
             idempotency_key,
-            cached,
+            existing,
         )
         return {
-            "sent_message_id": cached,
+            "sent_message_id": existing or "",
             "was_duplicate": True,
             "status": "duplicate_skipped",
         }
 
-    # --- Build message with threading headers ---
+    # --- We hold the reservation. Build + send + commit. ---
     new_message_id = f"{uuid.uuid4()}@{GMAIL_SMTP_HOST}"
     msg = _build_message(
         to=to,
@@ -227,12 +301,17 @@ async def send_email(
         message_id=new_message_id,
     )
 
-    # --- Send via SMTP ---
-    sent_id = await _smtp_send(msg)
-    logger.info("send_email: sent to=%s message_id=%s", to, sent_id)
+    try:
+        sent_id = await _smtp_send(msg)
+    except Exception:
+        # Release the reservation so the LangGraph send-retry path can
+        # try again with the same idempotency_key. Without this, a
+        # transient SMTP failure permanently blocks retry.
+        await _release_reservation(idempotency_key)
+        raise
 
-    # --- Persist idempotency record ---
-    await _record_sent(idempotency_key, sent_id)
+    logger.info("send_email: sent to=%s message_id=%s", to, sent_id)
+    await _commit_sent(idempotency_key, sent_id)
 
     return {
         "sent_message_id": sent_id,

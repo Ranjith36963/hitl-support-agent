@@ -13,12 +13,71 @@ Invariants:
 - Same PII value within one redact() call → same token (stable).
 - token_map keys are unique; values are the original PII strings.
 - restore(redact(text)[0], redact(text)[1]) == text (round-trip identity).
-- Pure function — no I/O, no LLM, no DB. Tests run instantly.
+- restore() substitutes longer tokens first to defeat [EMAIL_1] vs [EMAIL_10]
+  prefix collisions when the same ticket has 10+ distinct emails.
+- redact()/restore() are pure functions — no I/O, no LLM, no DB.
+
+Vault (added 2026-05-09 to close audit findings C1 + C2):
+- Token map MUST NOT be stored in `audit_log` — that field is checkpointed
+  to SQLite + emitted to LangSmith, leaking real PII to a third-party SaaS
+  and an on-disk persistence layer in violation of the "LLM never sees real
+  PII" invariant in spirit.
+- Module-level `_TOKEN_VAULT` keyed by ticket_id is the new home. It lives
+  for the duration of the process; cleared at terminal nodes.
+- An additional `envelope_from` slot per ticket distinguishes the SMTP
+  envelope sender (trustworthy, captured from Return-Path) from the RFC-822
+  `From:` header (spoofable). Send Email uses envelope_from as the recipient.
 """
 
 from __future__ import annotations
 
 import re
+import threading
+
+# ---------------------------------------------------------------------------
+# Ephemeral PII vault — module-level, NOT serialized to state, NOT checkpointed.
+# Keyed by ticket_id. Threading lock guards concurrent ticket processing.
+# ---------------------------------------------------------------------------
+
+_TOKEN_VAULT: dict[str, dict[str, str]] = {}
+_ENVELOPE_VAULT: dict[str, str] = {}
+_VAULT_LOCK = threading.Lock()
+
+
+def store_token_map(ticket_id: str, token_map: dict[str, str]) -> None:
+    """Persist a token_map for ticket_id in the ephemeral vault."""
+    with _VAULT_LOCK:
+        _TOKEN_VAULT[ticket_id] = dict(token_map)
+
+
+def get_token_map(ticket_id: str) -> dict[str, str]:
+    """Retrieve the token_map for ticket_id (empty dict if absent)."""
+    with _VAULT_LOCK:
+        return dict(_TOKEN_VAULT.get(ticket_id, {}))
+
+
+def store_envelope_from(ticket_id: str, envelope_from: str) -> None:
+    """Persist the SMTP envelope-from address for ticket_id.
+
+    This is the address Send Email uses as `to:`, NOT the spoofable
+    RFC-822 `From:` header. Captured from `Return-Path` by the email
+    listener at ingest time.
+    """
+    with _VAULT_LOCK:
+        _ENVELOPE_VAULT[ticket_id] = envelope_from
+
+
+def get_envelope_from(ticket_id: str) -> str | None:
+    """Retrieve the SMTP envelope-from for ticket_id (None if absent)."""
+    with _VAULT_LOCK:
+        return _ENVELOPE_VAULT.get(ticket_id)
+
+
+def clear_ticket(ticket_id: str) -> None:
+    """Remove all PII vault entries for ticket_id. Call at terminal nodes."""
+    with _VAULT_LOCK:
+        _TOKEN_VAULT.pop(ticket_id, None)
+        _ENVELOPE_VAULT.pop(ticket_id, None)
 
 # ---------------------------------------------------------------------------
 # Regex patterns (ordered most-specific first to avoid partial matches)
@@ -97,12 +156,15 @@ def redact(text: str) -> tuple[str, dict[str, str]]:
 def restore(text: str, token_map: dict[str, str]) -> str:
     """Replace tokens in *text* with their original PII values.
 
-    Performs simple string replacement for each token in the map.
+    Substitutes longer tokens first so `[EMAIL_10]` is replaced before
+    `[EMAIL_1]` — otherwise the shorter token's substitution leaves a
+    `0]` suffix in place of `[EMAIL_10]` in tickets with 10+ emails.
     Safe to call on text that has no tokens (returns text unchanged).
     """
     if not token_map:
         return text
     result = text
-    for token, original in token_map.items():
-        result = result.replace(token, original)
+    # Longest-first iteration defeats [EMAIL_1] vs [EMAIL_10] prefix collisions.
+    for token in sorted(token_map.keys(), key=len, reverse=True):
+        result = result.replace(token, token_map[token])
     return result

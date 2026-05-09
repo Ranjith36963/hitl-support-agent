@@ -16,6 +16,7 @@ import asyncio
 import contextlib
 import email as stdlib_email
 import logging
+import re
 import uuid
 from email.header import decode_header
 from typing import Any
@@ -60,10 +61,37 @@ def _extract_body(msg: stdlib_email.message.Message) -> str:
     return payload.decode(charset, errors="replace")
 
 
+_ENVELOPE_RE = re.compile(r"<([^>]+)>|([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})")
+
+
+def _extract_envelope_from(msg: stdlib_email.message.Message) -> str:
+    """Return the SMTP envelope-from address from `Return-Path`.
+
+    Gmail (and most MTAs) populate `Return-Path` with the actual SMTP
+    envelope-from. This is the trustworthy sender — the RFC-822 `From:`
+    header is content the sender controls and is spoofable.
+
+    Falls back to the empty string if Return-Path is missing or malformed,
+    in which case the caller should treat the recipient as unknown.
+    """
+    raw = msg.get("Return-Path") or msg.get("X-Original-Sender") or ""
+    if not raw:
+        return ""
+    match = _ENVELOPE_RE.search(raw)
+    if not match:
+        return ""
+    return (match.group(1) or match.group(2) or "").strip()
+
+
 def parse_email_to_ticket(raw_bytes: bytes) -> dict[str, Any]:
-    """Parse raw RFC-822 bytes into a ticket dict ready to seed AgentState."""
+    """Parse raw RFC-822 bytes into a ticket dict ready to seed AgentState.
+
+    `envelope_from` is the trustworthy recipient address. `from` is the
+    spoofable header — kept for LLM context only, NEVER used as recipient.
+    """
     msg = stdlib_email.message_from_bytes(raw_bytes)
     return {
+        "envelope_from": _extract_envelope_from(msg),
         "from": _decode_header(msg.get("From")),
         "subject": _decode_header(msg.get("Subject")),
         "body": _extract_body(msg),
@@ -72,8 +100,22 @@ def parse_email_to_ticket(raw_bytes: bytes) -> dict[str, Any]:
 
 
 def ticket_to_initial_state(ticket: dict[str, Any]) -> Any:
-    """Build the initial AgentState from a parsed ticket dict."""
+    """Build the initial AgentState from a parsed ticket dict.
+
+    Stores envelope_from in the ephemeral PII vault (NOT in audit_log)
+    so Send Email can retrieve the trustworthy recipient address without
+    leaking it to LangSmith / SQLite checkpoints.
+    """
+    from src.pii import store_envelope_from
+
     ticket_id = "ticket-" + uuid.uuid4().hex[:12]
+    envelope = ticket.get("envelope_from", "")
+    if envelope:
+        store_envelope_from(ticket_id, envelope)
+
+    # customer_message: the LLM sees the spoofable From for context, but
+    # the agent NEVER uses it as the recipient — Send Email reads the
+    # envelope-from from the vault.
     return ticket_id, initial_state(
         ticket_id=ticket_id,
         customer_message=f"From: {ticket['from']}\nSubject: {ticket['subject']}\n\n{ticket['body']}",

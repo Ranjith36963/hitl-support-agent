@@ -42,11 +42,29 @@ def _client() -> Any:
 
 
 def _customer_email_from_audit(state: AgentState) -> str:
-    """Recover customer email from the pii_redact audit entry."""
+    """Recover the customer email — vault first, audit_log fallback.
+
+    Mirrors `src.nodes._customer_email_from_audit` two-tier lookup. v4
+    Researcher must use the same trustworthy envelope-from path to avoid
+    re-introducing the spoofed-recipient bug audit C1 closed.
+    """
+    from src.pii import get_envelope_from, get_token_map
+
+    ticket_id = state.get("ticket_id", "")
+    if ticket_id:
+        envelope = get_envelope_from(ticket_id)
+        if envelope:
+            return envelope
+        tm = get_token_map(ticket_id)
+        for token, original in tm.items():
+            if token.startswith("[EMAIL_"):
+                return original
+    # Legacy compat: tests + checkpoints written before the vault refactor
+    # still feed token_map via audit_log. Drop after a few weeks.
     for entry in reversed(state.get("audit_log") or []):
         if entry.get("node") == "pii_redact":
-            tm = entry.get("token_map") or {}
-            for token, original in tm.items():
+            tm_legacy = entry.get("token_map") or {}
+            for token, original in tm_legacy.items():
                 if token.startswith("[EMAIL_"):
                     return original
     return "unknown@example.com"
