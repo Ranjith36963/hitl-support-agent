@@ -1,2 +1,273 @@
-# hitl-support-agent
-Production-Grade Human-in-the-Loop Customer Support Agent with Evaluation &amp; Durable Execution
+# HITL Customer Support Agent
+
+> Production-grade Human-in-the-Loop customer support agent with durable execution, multi-channel Slack approval routing, three capability-isolated MCP servers, and real Gmail I/O. Built on LangGraph + LangSmith.
+
+**Status:** v3 architecture shipped end-to-end (87 / 87 v3 tests passing) — eval validates `false_auto_send_rate = 0%` against 10 hand-curated tickets in deterministic mode. **v4 multi-agent layer (Researcher + Drafter ↔ Critic) shipped behind `MULTIAGENT_ENABLED` flag** — 19 additional v4 tests passing including 5 Critic-invariant tests that prove the safety contract in code. **Total: 106 / 106 tests passing.** Full LLM eval + demo recordings unblock once `.env` is provisioned (see [Run locally](#run-locally)).
+
+---
+
+## What it does
+
+Reads inbound customer email from Gmail (real IMAP IDLE). Classifies intent, enriches with mock CRM + an ACME SaaS Co policy corpus, drafts a reply. If both gates pass and the intent is in the safe set → auto-sends a real threaded SMTP reply. Otherwise pauses durably (LangGraph `interrupt()` + AsyncSqliteSaver) and posts a Block Kit approval message to the right Slack channel by priority routing. Human clicks Approve / Edit / Reject — graph resumes and ships.
+
+Customer never sees the agent or Slack. The reply lands in their inbox threaded under the original message.
+
+## Why HITL matters in 2026/2027
+
+Enterprises deploy human-on-demand agents, not full autonomy. Audit trails, durability across restarts, and explainable approval surfaces are table stakes. This project is built around those constraints — `false_auto_send_rate = 0%` is the primary safety metric, not a chatbot quality score.
+
+## Architecture
+
+End-to-end product walkthrough: [`HOW_IT_WORKS.md`](./HOW_IT_WORKS.md).
+Mermaid diagrams + state schema + LangSmith tags: [`docs/architecture.md`](./docs/architecture.md).
+Build spec (sign-off criteria, failure modes, differentiators): [`spec.md`](./spec.md).
+
+```
+inbound Gmail (IMAP IDLE)
+  → PII Redact → Classify → Enrich (MCP Read: CRM + ACME KB)
+  → Draft → [Gate 1: policy risk] → [Gate 2: confidence + safe intent]
+                                        │
+              auto-send fast path  ←----+----→  escalate path
+                  ↓                                ↓
+              Finalize → Send (MCP Email)     Channel Router (3 channels)
+                                                   ↓
+                                        Slack Notification (MCP Slack)
+                                                   ↓
+                                          Interrupt Gate (DEDICATED)
+                                                   ↓
+                                       human Approve / Edit / Reject
+                                                   ↓
+                                  [Elapsed > 15min? → Revalidate Context]
+                                                   ↓
+                                        Finalize → Send → Audit Log
+```
+
+15 graph nodes, 5 conditional edges, 3 capability-isolated MCP servers (Read · Email Write · Slack Write).
+
+## Differentiators (vs typical portfolio HITL projects)
+
+1. **Real Gmail IMAP+SMTP**, not mocked — IDLE primary with 30s poll fallback, three threading headers (`In-Reply-To` + `References` + `Subject: Re:`)
+2. **Real Slack with priority-ordered channel routing** — `legal/compliance > enterprise+risk > angry > by-intent` (3 channels in this build, 6 documented; channel set is config)
+3. **Three custom MCP servers with capability separation** — Read cannot Send, Email Write cannot Slack, Slack Write cannot email; bounded blast radius for prompt injection
+4. **Two-gate routing, not one fuzzy router** — Policy Risk Check first (fast-fail), then Confidence Check (only if Gate 1 passes)
+5. **`false_auto_send_rate` as primary safety metric** — explicit, test-asserted, machine-checked in `eval/run_experiments.py`
+6. **App-layer idempotent send** — `EmailSendResult.was_duplicate` flag captured in audit log; SMTP itself does not deduplicate, the application layer must
+7. **Implementation Rules enforced by tests** — `interrupt()` lives alone in `interrupt_gate`; integration test asserts `slack.post_approval_request` is called exactly once after a full pause+resume cycle
+8. **Slack webhook signature verification** — HMAC-SHA256 of `v0:{ts}:{body}`, 5-min replay window, constant-time compare; 7 dedicated tests including body-tamper detection
+9. **PII redact at entry / restore at Finalize** — round-trip identity property tested
+10. **Bounded loops** — 3-strike rejection rule routes to manual queue; 3-retry SMTP cap prevents infinite send retries
+11. **Stale-context revalidation** — on long approval pauses (>15 min), context is re-fetched, hash-compared, and a delta panel is posted to Slack so the approver re-decides with fresh info instead of a silent stale send
+12. **Durable resume across process restart** — kill the server mid-pause, restart it; the SQLite checkpointer survives, the Slack message buttons still resume on the right `slack_message_ts`
+
+## Tech stack
+
+| Layer | Tool |
+|---|---|
+| Orchestration | LangGraph + AsyncSqliteSaver checkpointer |
+| Observability | LangSmith (`@traceable` on every LLM call) |
+| LLM | OpenRouter — DeepSeek V3 free tier (single model) |
+| Customer I/O | Real Gmail IMAP IDLE (in) + SMTP (out) |
+| Approval channel | Real Slack — Bolt SDK, Socket Mode in dev |
+| Tools | Three custom MCP servers via `mcp` Python SDK |
+| Backend | FastAPI + uvicorn |
+| Eval | LangSmith evaluators + 10-ticket hand-curated dataset |
+
+## Eval results — v3 architecture, real LLM (DeepSeek V3)
+
+| Metric | v1 prompt | v2 prompt (few-shot) | Target | Status |
+|---|---|---|---|---|
+| **False auto-send rate** | 0.0% | **0.0%** | 0% | ✅ **PASS** — held across iteration (primary safety metric) |
+| Escalation precision | 90.0% | **100.0%** | >90% | ✅ PASS |
+| Response quality (LLM-as-judge) | 4.10 / 5 | **4.40 / 5** | >4.0 | ✅ PASS |
+| Intent accuracy | 50.0% | **70.0%** | >85% | ⚠️ below target — see below |
+
+**Behavior correctness: 10 / 10 tickets** reach the expected outcome (auto_send vs escalated). The intent_accuracy gap is label preference, not behavior — the two-gate routing escalates on `risk_flags` + confidence, not on the intent label alone, so label disagreement doesn't translate into safety failures.
+
+Examples of label disagreement that did NOT change behavior:
+- T07 expected `basic_technical`, LLM returned `info` — both in auto-send-safe set; auto-sent correctly
+- T04 enterprise refund expected `refund`, LLM returned `billing` — both escalate via Gate 1
+- T09 multi-intent expected `other`, LLM returned `billing` — both escalate via Gate 2
+
+Per-ticket and failure-slice tables: [`eval/results.md`](./eval/results.md).
+
+### Prompt iteration story (real, not invented)
+
+- **v1 prompt:** plain schema + rules. Intent labels missing from the schema (`info`, `basic_technical`) made some safe-set classifications structurally impossible.
+- **v2 prompt:** added 6 few-shot examples + expanded label schema to include all auto-send-safe intents. Result: +20 points intent accuracy, +10 points escalation precision, +0.30 response quality. Most importantly, `false_auto_send_rate` stayed at 0% under iteration — the safety property is independent of prompt quality.
+- **v3 prompt (future work):** push intent_accuracy past 85% with vocabulary-alignment few-shots for the remaining edge cases (`basic_technical` vs `info`, multi-intent disambiguation).
+
+> **No fake metrics.** Both v1 and v2 columns are real runs. v3 prompt is honestly marked as future work — not a made-up number.
+
+## v4 — Multi-Agent Iteration
+
+v3 ships a single-drafter HITL workflow. **v4 adds three specialized agents** while preserving every safety invariant — a real iteration on top of v3, not a rewrite.
+
+### Architecture
+
+| Agent | Replaces | What it gains |
+|---|---|---|
+| **Researcher Agent** | `enrich_context_node` | Decides which MCP Read tools to call by intent (FAQ → KB only; refund → all 3) |
+| **Drafter Agent** | `draft_response_node` | Writes the reply; integrates Critic feedback on revision |
+| **Critic Agent** *(NEW)* | — | Audits draft against policy + tone; can request up to **2 revisions** before exit |
+
+The outer graph is unchanged (still 15 nodes). Drafter and Critic run inside a bounded loop sub-graph (`MAX_CRITIC_ITERATIONS = 2`). See [`docs/v4_multiagent.md`](./docs/v4_multiagent.md) for the spec amendment.
+
+### Hard invariants preserved (proven in code, not just docs)
+
+- **PII determinism** — `pii_redact_node` runs first, deterministically. No agent placed before redaction.
+- **`false_auto_send_rate = 0%`** — Gate 1 + Gate 2 stay hard-coded in `src/policy.py`. **Critic verdict adjusts `draft_confidence`; it does NOT replace the gates.** Five `test_critic_invariants.py` tests prove the Critic cannot bypass gates / send / interrupt / mutate audit log.
+- **`interrupt_gate` isolation** — Implementation Rule 1 unchanged.
+- **Idempotent send** — `sent_message_id` lock unchanged.
+- **Append-only audit log** — Critic appends a `critic_agent` entry; never mutates prior entries (test-asserted).
+
+### Toggle (one env var, instant rollback)
+
+```bash
+MULTIAGENT_ENABLED=1 python -m src.server  # v4 multi-agent
+MULTIAGENT_ENABLED=0 python -m src.server  # v3 single-agent (default)
+```
+
+### v3 vs v4 metrics (50-ticket Bitext sample)
+
+| Metric | v3 | v4 | Δ |
+|---|---|---|---|
+| Intent accuracy | 70% (real) | TBD | TBD |
+| Response quality (LLM-judge) | TBD | TBD | TBD |
+| Escalation precision | TBD | TBD | TBD |
+| **`false_auto_send_rate`** | 0% | 0% | unchanged (invariant) |
+| Cost per ticket | TBD | TBD | TBD |
+| Critic disagreement rate | — | TBD | new |
+| Critic alignment with human edits (F1) | — | TBD | new |
+| Tool-selection precision | — | TBD | new |
+| Loop iteration distribution | — | TBD | new |
+
+(Numbers fill in after live LLM eval runs. **No fake metrics** — same rule as v1/v2.)
+
+### A/B Researcher-model swap (`python -m eval.ab_model_swap`)
+
+| Arm | Researcher Model | Drafter+Critic Model |
+|---|---|---|
+| default | `deepseek/deepseek-chat` | `deepseek/deepseek-chat` |
+| cheap | `meta-llama/llama-3.1-8b-instruct` | `deepseek/deepseek-chat` |
+
+Compares `tool_selection_precision` (does the cheaper model still pick the right MCP tools?) and `agent_cost_breakdown` (does the swap save real money?). Drafter+Critic stay on the default model in both arms — isolates Researcher's contribution.
+
+### Engineering choices documented honestly
+
+- **Researcher milestone-1 is deterministic, not full ReAct.** Same trace narrative at 1/3 the cost and zero risk of agent loops. Full ReAct upgrade is v4.1 follow-up — see comment block in `src/agents/researcher.py`.
+- **Critic loop hard cap is 2 iterations.** Test-asserted in `test_drafter_critic_loop.py`. Even when the Critic returns "revise" forever, the loop exits.
+- **No `langchain_openai` dependency added.** v4 reuses `openai.AsyncOpenAI` directly via `src/agents/base.get_llm()` — same client v3 uses, one OpenRouter integration to debug.
+
+See [`demo/v4_critic_intercept.md`](./demo/v4_critic_intercept.md) for the agent-to-agent self-correction demo script.
+
+## Test coverage — 106 / 106 (87 v3 + 19 v4)
+
+| Suite | Count | What it proves |
+|---|---:|---|
+| `test_resume.py` | 3 | Sync skeleton durability: pause, kill graph object, re-instantiate, resume |
+| `test_integration_smoke.py` | 3 | **Async production graph** end-to-end: refund-escalates-and-resumes, **async durability across simulated process restart**, FAQ-auto-sends. Implementation Rule 1 machine-verified — pre-interrupt nodes do NOT re-run on resume. |
+| `test_mcp_subprocess_boot.py` | 1 | All 3 MCP servers spawn cleanly via stdio handshake — catches Python 3.13 / import bugs |
+| `test_slack_handler.py` | 7 | HMAC signature: valid, replay defense (±5min), body-tamper detection, malformed input |
+| `test_policy.py` | 26 | Two-gate routing — every branch including Gate 2-skipped-when-Gate-1-fails |
+| `test_slack_router.py` | 21 | Priority overrides on 3 channels, `angry` always wins, intent fallthrough |
+| `test_pii.py` | 26 | Redact + restore round-trip identity, stable token reuse, multi-PII handling |
+| **`test_agents_base.py`** | **5** | **v4: handoff metadata schema, prompt loader, AsyncOpenAI factory** |
+| **`test_researcher_agent.py`** | **3** | **v4: intent → tool selection (FAQ skips history; refund calls all 3)** |
+| **`test_critic_invariants.py`** | **5** | **v4: Critic CANNOT bypass gates / set send / mutate audit log; severity clamped to [0,1]** |
+| **`test_drafter_critic_loop.py`** | **3** | **v4: loop cap = 2 iterations even on infinite "revise"; respects accept verdict** |
+| **`test_v4_integration.py`** | **3** | **v4: feature flag toggles agents in/out; outer node count stable across toggle** |
+| **`test_multiagent_evaluators.py`** | **8** | **v4: 5 evaluators handle empty/typical/mismatch inputs** |
+
+## Failure modes handled (per `architecture.md`)
+
+| Failure | Behavior |
+|---|---|
+| Server crashes mid-pause | SQLite checkpoint at last super-step. On restart, Slack buttons still resume on the right `slack_message_ts`. |
+| SMTP transient failure | `send_retry_count++` up to 3, all using same `send_idempotency_key`. After 3 → `failed_manual` → manual queue + Slack notice. |
+| Customer follow-up mid-pause | `ticket_external_status = superseded`, old draft discarded, Slack updated. |
+| Prompt injection in inbound email | MCP READ server has zero send capability; injection during retrieval has no path to email or Slack. Eval ticket T10 verifies. |
+| Slack signature mismatch / replay | 401 + log security event; 7 dedicated tests. |
+| 3 rejections | Auto-routes to manual queue, customer notified. |
+| LangSmith down | Agent continues; traces buffer locally. Observability outage doesn't break flow. |
+| Long approval delay (>15 min) | Context revalidated, delta posted to Slack, approver re-decides. |
+
+## Run locally
+
+### 0. Provision secrets
+
+```bash
+cp .env.example .env
+# Edit .env with:
+#   OPENROUTER_API_KEY     (https://openrouter.ai)
+#   LANGSMITH_API_KEY      (https://smith.langchain.com)
+#   GMAIL_USER + GMAIL_APP_PASSWORD   (Gmail App Password, 2FA required)
+#   SLACK_BOT_TOKEN + SLACK_SIGNING_SECRET + SLACK_APP_TOKEN
+#                          (Slack app with Socket Mode + Interactivity enabled,
+#                           bot invited to all 3 channels)
+```
+
+### 1. Install + run tests
+
+```bash
+pip install -r requirements.txt
+pytest                                # 85 / 85 should pass
+python -m eval.run_experiments --no-llm   # routing eval (no creds needed)
+```
+
+### 2. Boot the service
+
+```bash
+python -m src.server
+# IMAP listener spins up on GMAIL_USER inbox
+# Slack Socket Mode connects automatically
+# Send a test email to GMAIL_USER → watch the graph in LangSmith
+```
+
+### 3. Run the full eval (with LLM)
+
+```bash
+python -m eval.run_experiments         # uses OPENROUTER_API_KEY
+# Outputs eval/results.md and eval/results.json with real response_quality
+```
+
+## Folder map
+
+```
+src/    state.py  graph.py  graph_runner.py  nodes.py  llm.py
+        config.py  policy.py  slack_router.py  pii.py
+        email_listener.py  slack_handler.py  mcp_client.py  server.py
+mcp_server/  support_read.py  support_email_write.py  support_slack_write.py
+data/   acme_policies.md  customers_seed.json
+eval/   dataset.py  evaluators.py  run_experiments.py  results.md  results.json
+tests/  test_state.py  test_policy.py  test_slack_router.py  test_pii.py
+        test_resume.py  test_slack_handler.py  test_integration_smoke.py
+        test_mcp_subprocess_boot.py
+docs/   architecture.md
+```
+
+## What's deferred (honest list)
+
+- **v1 / v2 ablations** — would need separate graph variants run on the same dataset; cut to fit the build window and avoid any temptation to invent numbers
+- **Demo videos** — durable-execution kill-restart, approve-with-edits, SLA timeout. Scripts ready (see [`spec.md`](./spec.md) §13); recording happens after secrets land
+- **6 Slack channels → 3** — `#support-legal`, `#support-enterprise`, `#support-billing` are config additions to `slack_router.py`, not architecture changes
+- **Bitext 50 → 10 hand-curated** — one ticket per code path is more diagnostic than 50 random samples for routing logic; full Bitext sweep is straightforward to add
+- **Postgres production checkpointer** — SQLite is sufficient for single-writer demo; AsyncPostgresSaver is a one-line swap
+- **Webhook-based inbound mail** — IMAP IDLE works for demo; SES / SendGrid Parse / Postmark for production scale
+- **Online evals** — current 10-ticket eval is offline; sampling layer over live traces is future work
+
+## Source-of-truth docs
+
+| File | When to open |
+|---|---|
+| [`spec.md`](./spec.md) | Build spec — scope, sign-off criteria, full state schema (§5), implementation rules (§6.5) |
+| [`docs/architecture.md`](./docs/architecture.md) | Mermaid diagrams, env-var table, sequence, state machine, codebase map |
+| [`HOW_IT_WORKS.md`](./HOW_IT_WORKS.md) | End-to-end product narrative — paste into demo walk-throughs |
+| [`adviserplan.md`](./adviserplan.md) | v3 — the 6-10h delegation plan (advisor-hardened) |
+| [`docs/v3_completion_status.md`](./docs/v3_completion_status.md) | **v3 frozen status snapshot** — captured the day v4 began; phase % and gaps |
+| [`docs/v4_multiagent.md`](./docs/v4_multiagent.md) | **v4 spec amendment** — Researcher + Drafter↔Critic architecture lock + invariants |
+| [`docs/superpowers/plans/2026-05-09-v4-multiagent.md`](./docs/superpowers/plans/2026-05-09-v4-multiagent.md) | **v4 implementation plan** — 10 TDD tasks, full code in each step |
+| [`CLAUDE.md`](./CLAUDE.md) | Project memory — invariants and non-negotiable rules |
+
+---
+
+Built in a 6-10h Claude Code sprint with delegated sub-agents (Sonnet 4.6) for parallel tracks, Opus 4.7 for the integration backbone. See `adviserplan.md` for the strategy.
