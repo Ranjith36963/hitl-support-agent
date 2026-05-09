@@ -15,6 +15,11 @@
 - **Never work in desperation.** If something is broken, blocked, or unclear — stop and say so plainly. Do not paper over a failing test, mock around a broken integration, or skip a step to look productive.
 - **Never sugarcoat.** Tell bad news in the same plain language as good news. A failing test stays failing until it's actually fixed; a half-working feature is described as half-working, not as "shipped."
 
+## Communication style (non-negotiable)
+
+- **Reply in bullet points, not paragraphs.** Lead with status: what's done · what's broken · what's blocked · what's next. Five tight bullets beat three dense paragraphs.
+- **Plain language.** Skip unexplained jargon and command syntax inside explanations unless the user asks. Keep grammar correct, cut filler.
+
 ## What we're building
 
 Agent-first, human-on-demand customer support agent. **Real Gmail** in/out (IMAP IDLE / SMTP), **real Slack** with 6 channels routed by priority, durable LangGraph workflow, **three capability-isolated MCP servers**. Mock CRM + fictional **ACME SaaS Co** policy corpus. 24h portfolio build, agent owns the workflow, humans get pulled in only when needed.
