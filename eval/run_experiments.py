@@ -33,7 +33,7 @@ import os
 import sys
 import tempfile
 import traceback
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -73,7 +73,6 @@ from src.mcp_client import (  # noqa: E402
     SlackUpdateResult,
 )
 from src.state import initial_state  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Fake MCPClientRouter -- same shape as tests/test_integration_smoke.py::_fake_router()
@@ -383,7 +382,7 @@ async def _run_all(no_llm: bool) -> None:
 
     # --- Build output dicts ---
     metrics: dict[str, Any] = {
-        "run_timestamp": datetime.now(timezone.utc).isoformat(),
+        "run_timestamp": datetime.now(UTC).isoformat(),
         "mode": "no-llm (deterministic)" if no_llm else "real-llm",
         "ticket_count": len(results),
         "intent_accuracy": round(intent_acc, 4),
@@ -611,11 +610,45 @@ def _parse_args() -> argparse.Namespace:
             "Proves harness wiring without OPENROUTER_API_KEY."
         ),
     )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--multiagent",
+        dest="multiagent",
+        action="store_true",
+        default=None,
+        help="Force v4 multi-agent path (sets MULTIAGENT_ENABLED=1).",
+    )
+    mode.add_argument(
+        "--no-multiagent",
+        dest="multiagent",
+        action="store_false",
+        help="Force v3 single-agent path (sets MULTIAGENT_ENABLED=0).",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = _parse_args()
+    # Set MULTIAGENT_ENABLED EXPLICITLY before any graph module is imported by
+    # the inner asyncio loop. Never inherit shell env silently — that would let
+    # the same eval command produce different metrics depending on which
+    # terminal session you run it in.
+    if args.multiagent is None:
+        if "MULTIAGENT_ENABLED" not in os.environ:
+            print(
+                "[eval] MULTIAGENT_ENABLED not set — defaulting to v3 mode. "
+                "Pass --multiagent or --no-multiagent to be explicit."
+            )
+            os.environ["MULTIAGENT_ENABLED"] = "0"
+        else:
+            inherited = os.environ["MULTIAGENT_ENABLED"]
+            print(
+                f"[eval] WARNING: inheriting MULTIAGENT_ENABLED={inherited!r} from shell env. "
+                f"Pass --multiagent or --no-multiagent to make this explicit."
+            )
+    else:
+        os.environ["MULTIAGENT_ENABLED"] = "1" if args.multiagent else "0"
+        print(f"[eval] mode: {'v4 multi-agent' if args.multiagent else 'v3 single-agent'}")
     asyncio.run(_run_all(no_llm=args.no_llm))
 
 

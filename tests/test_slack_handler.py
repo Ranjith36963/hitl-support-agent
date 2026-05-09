@@ -25,7 +25,7 @@ SECRET = "8f742231b9a1c0e9ca1e1c2c3d4e5f60"  # test fixture, not a real secret
 
 
 def _sig(body: bytes, timestamp: int, secret: str = SECRET) -> str:
-    base = f"v0:{timestamp}:".encode("utf-8") + body
+    base = f"v0:{timestamp}:".encode() + body
     return "v0=" + hmac.new(secret.encode("utf-8"), base, hashlib.sha256).hexdigest()
 
 

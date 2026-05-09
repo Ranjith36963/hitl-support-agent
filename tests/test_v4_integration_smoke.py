@@ -18,7 +18,6 @@ What this proves under MULTIAGENT_ENABLED=1:
 from __future__ import annotations
 
 import importlib
-import os
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -139,6 +138,7 @@ async def test_v4_faq_auto_sends_through_drafter_critic_loop(tmp_path, monkeypat
     with (
         patch("src.nodes.classify_intent", fake_classify),
         patch("src.nodes._client", lambda: fake_router),
+        patch("src.agents.researcher._client", lambda: fake_router),
         patch("src.agents.drafter._llm_draft", fake_drafter_llm),
         patch("src.agents.critic._llm_judge", fake_critic_llm),
     ):
@@ -224,6 +224,7 @@ async def test_v4_critic_revision_loop_fires_when_drafter_low_confidence(tmp_pat
     with (
         patch("src.nodes.classify_intent", fake_classify),
         patch("src.nodes._client", lambda: fake_router),
+        patch("src.agents.researcher._client", lambda: fake_router),
         patch("src.agents.drafter._llm_draft", fake_drafter_llm),
         patch("src.agents.critic._llm_judge", fake_critic_llm),
     ):
@@ -313,6 +314,7 @@ async def test_v4_refund_escalates_through_slack_then_resumes(tmp_path, monkeypa
     with (
         patch("src.nodes.classify_intent", fake_classify),
         patch("src.nodes._client", lambda: fake_router),
+        patch("src.agents.researcher._client", lambda: fake_router),
         patch("src.agents.drafter._llm_draft", fake_drafter_llm),
         patch("src.agents.critic._llm_judge", fake_critic_llm),
     ):

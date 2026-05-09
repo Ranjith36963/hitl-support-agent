@@ -25,20 +25,20 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 from langsmith import traceable
 
-from src.agents.base import build_handoff_metadata
+from src.agents.base import build_handoff_metadata, get_client
 from src.state import AgentState
 
 
 def _client() -> Any:
     """Get the live MCPClientRouter.
 
-    Delegates to src.nodes._client at call time so the eval harness's single
-    patch point (`src.nodes._client`) reaches v4 too. Tests still monkeypatch
-    `src.agents.researcher._client` directly — that replaces this function
-    entirely and bypasses the delegation, which is the intended behavior.
+    Delegates to `src.agents.base.get_client` (which goes straight to
+    `graph_runner.get_mcp_router`). v4 does NOT import from `src.nodes`
+    anymore — module dependency arrow points only v3→shared and v4→shared,
+    never v4→v3. Tests still monkeypatch `src.agents.researcher._client`
+    directly to inject a fake router.
     """
-    from src.nodes import _client as nodes_client
-    return nodes_client()
+    return get_client()
 
 
 def _customer_email_from_audit(state: AgentState) -> str:

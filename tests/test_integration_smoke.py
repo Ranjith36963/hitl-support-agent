@@ -15,22 +15,21 @@ What this proves:
 
 from __future__ import annotations
 
-import os
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
-# These tests patch v3 LLM call sites (src.nodes.classify_intent and
-# src.nodes.draft_response). Under MULTIAGENT_ENABLED=1, draft_response_node
-# is replaced by the Drafter sub-graph which calls src.agents.drafter._llm_draft
-# and src.agents.critic._llm_judge — neither covered by these patches. v4 has
-# its own integration smoke (tests/test_v4_integration_smoke.py).
-pytestmark = pytest.mark.skipif(
-    os.environ.get("MULTIAGENT_ENABLED", "0") == "1",
-    reason="v3-only smoke tests; v4 path tested in test_v4_integration_smoke.py",
-)
 from langgraph.types import Command
+
+
+# Force v3 mode for every test in this file, regardless of ambient shell env.
+# The previous `pytestmark = pytest.mark.skipif(...inherited env...)` pattern
+# was brittle: if CI ever inherited MULTIAGENT_ENABLED=1, these tests would
+# silently vanish from the count with no failure reported. Now they always
+# RUN, and they always run in v3 mode.
+@pytest.fixture(autouse=True)
+def _force_v3_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MULTIAGENT_ENABLED", "0")
 
 from src.graph import async_sqlite_checkpointer, compile_full_with_checkpointer
 from src.llm import ClassificationResult, DraftResult

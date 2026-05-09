@@ -26,7 +26,6 @@ from typing import Any
 
 from eval.dataset import EvalTicket
 
-
 # ---------------------------------------------------------------------------
 # EvalResult — what run_experiments captures per ticket
 # ---------------------------------------------------------------------------

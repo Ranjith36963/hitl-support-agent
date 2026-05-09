@@ -78,9 +78,21 @@ def build_handoff_metadata(
     }
 
 
+def get_client() -> Any:
+    """Return the live MCPClientRouter for v4 agents.
+
+    Direct delegation to graph_runner — does NOT import from src.nodes,
+    so v4 agents do not have a runtime dependency on v3's module. Tests
+    patch this function directly to inject a fake router.
+    """
+    from src.graph_runner import get_mcp_router
+    return get_mcp_router()
+
+
 __all__ = [
     "PROMPT_DIR",
     "build_handoff_metadata",
+    "get_client",
     "get_llm",
     "get_model_id",
     "load_prompt",

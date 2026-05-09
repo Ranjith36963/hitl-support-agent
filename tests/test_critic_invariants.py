@@ -109,8 +109,8 @@ async def test_critic_appends_audit_log_does_not_mutate():
 async def test_critic_escalates_on_malformed_llm_json(monkeypatch):
     """If the LLM returns garbage instead of JSON, Critic must escalate-on-uncertainty
     (verdict=revise, severity=0.5) so Gate 2 routes to human — NEVER auto-pass."""
-    import json
     from unittest.mock import AsyncMock, MagicMock
+
     from src.agents import critic as critic_mod
 
     # Build a fake OpenAI client that returns non-JSON content

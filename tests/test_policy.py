@@ -25,10 +25,8 @@ Gates per CLAUDE.md "Two-gate routing":
 TDD discipline: one failing test at a time. Tests written before implementation.
 """
 
-import pytest
 from src.policy import gate_one_policy_risk, gate_two_confidence, should_auto_send
 from src.state import AgentState, initial_state
-
 
 # ---------------------------------------------------------------------------
 # Helpers

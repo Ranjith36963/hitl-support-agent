@@ -13,10 +13,8 @@ Priority (collapsed for 3 channels):
 TDD discipline: tests written before implementation.
 """
 
-import pytest
 from src.slack_router import route_channel
 from src.state import AgentState, initial_state
-
 
 # ---------------------------------------------------------------------------
 # Helpers

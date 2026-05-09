@@ -4,9 +4,7 @@ TDD discipline: tests written before implementation.
 Each block: one failing test → minimal code to pass → next test.
 """
 
-import pytest
 from src.pii import redact, restore
-
 
 # ---------------------------------------------------------------------------
 # Basic email redaction
