@@ -2,7 +2,9 @@
 
 > A production-style customer support system that combines LLM reasoning, deterministic policy enforcement, and human approval workflows with durable execution. Real email I/O, real multi-channel Slack approvals, fictional ACME SaaS Co policy corpus, three capability-isolated MCP servers.
 
-This is the canonical narrative — open this in interviews, paste sections into the README, walk through it on a demo call. `spec.md` is the build spec, `docs/architecture.md` has the diagrams, this doc tells the story.
+This is the canonical narrative — open this in interviews, paste sections into the README, walk through it on a demo call. `spec.md` is the build spec, `docs/architecture.md` has the diagrams + state schema + LangSmith tag table, this doc tells the story.
+
+The runtime decomposes into seven layers (see `docs/architecture.md` for the table): **Ingestion** (IMAP/SMTP), **Orchestration** (LangGraph + SQLite checkpointer), **Intelligence** (LLM via OpenRouter), **Policy** (two-gate routing + ACME KB retrieval), **HITL** (Slack notification + interrupt + action handler), **Execution** (Finalize + Send + Audit), **Observability** (LangSmith trace + cost tracking). Every step below maps to one of these layers; the layer names are the folder structure too.
 
 ---
 
@@ -47,11 +49,13 @@ Returns: `intent=refund, intent_confidence=0.88, sentiment=neutral, risk_flags=[
 ## Step 5 — Enrich Context
 
 The agent calls the **MCP Read Server** — three calls in parallel:
-- `get_crm_profile(jamie@example.com)` → `tier=Standard, contract_value=$240/yr, joined=2024-08, billing=current`
+- `get_crm_profile(jamie@example.com)` → `customer_tier=Standard, contract_value=$240/yr, joined=2024-08, billing=current`
 - `get_customer_history(jamie@example.com)` → 2 prior tickets, both resolved
 - `get_kb_article("refund $200")` → returns the ACME Policy 4.2.1 chunk verbatim: *"Refunds $100–$500: Requires Tier-1 agent approval."*
 
-The agent computes a `context_hash` of everything retrieved. (This matters at Step 12 if a human takes a long time.)
+`customer_tier` lands in state and feeds the Channel Router at Step 8. The agent also computes a `context_hash` of everything retrieved. (That matters at Step 12 if a human takes a long time.)
+
+This step writes traces to LangSmith just like every step in the graph — every node call, every LLM token, every MCP call ends up tagged in a single trace per ticket so failure-slice analysis works (see the LangSmith tag table in `docs/architecture.md`).
 
 ## Step 6 — Draft Reply
 
@@ -100,7 +104,13 @@ Slack returns the message timestamp; we save `slack_message_ts` to state. **The 
 
 ## Step 10 — Interrupt Gate (dedicated node, only the pause)
 
-In a separate node, the graph calls `interrupt()`. Nothing else in this node — per Implementation Rule 1, side effects (the Slack post) live in a *different* node so resumes don't duplicate them.
+In a separate node, the graph calls `interrupt()`. Nothing else in this node — per **Implementation Rule 1**, side effects (the Slack post) live in a *different* node so resumes don't duplicate them.
+
+> **Two LangGraph rules this code follows (not optional, both silent-failure if violated):**
+>
+> **Rule 1 —** `interrupt()` lives alone in its own node. When LangGraph resumes after `interrupt()`, the node containing the call restarts from the beginning. Code before the interrupt runs again on every resume. Side effects in that node duplicate. Pattern: side effects go in *downstream* nodes that run exactly once per resume.
+>
+> **Rule 2 —** Never wrap `interrupt()` in `try/except`. `interrupt()` works by raising a special exception that the LangGraph runtime catches. A broad `try/except` swallows that exception; the graph either hangs or skips the pause entirely. Error handling lives in *other* nodes, not the interrupt node.
 
 The SQLite checkpointer has already persisted state at the last super-step boundary. **Execution literally pauses.** If your server crashes right now, restart and Jamie's ticket survives — same state, same draft, same Slack message buttons still working (the webhook resume targets `slack_message_ts`).
 
@@ -238,6 +248,19 @@ Jamie still gets a reply via real email, threaded under her original. She's stil
 | **Ticketing system** | — | Direct email → LangGraph (no Zendesk) |
 
 Production swap at any layer is an MCP config change, not a graph rewrite.
+
+---
+
+## How we know the system actually works (eval)
+
+Five evaluators run against the **Bitext Customer Support dataset** (50-ticket sample: 40 dev / 10 holdout) via LangSmith:
+1. **Intent accuracy** — exact-match against labels
+2. **Response quality** — LLM-as-judge with rubric
+3. **Escalation precision** — did the two-gate router send to human correctly?
+4. **`false_auto_send_rate`** — primary safety metric. Target: 0%. This is the metric that actually matters: did the agent ever auto-send a refund / angry / policy-sensitive reply that should have been escalated?
+5. **Failure slice analysis** — accuracy broken down by `intent × risk_flags × confidence_bucket`. Tells you exactly where v1 → v2 → v3 improvements landed.
+
+Every trace tagged in LangSmith with `graph_version`, `intent`, `outcome`, `human_edited`, `final_state`, `risk_flags`, `confidence_bucket` — see the full tag table in `docs/architecture.md`.
 
 ---
 

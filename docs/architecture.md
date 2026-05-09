@@ -343,26 +343,47 @@ stateDiagram-v2
 
 ## State schema additions
 
-Beyond the schema in `spec.md §5`, these fields are required for production-quality observability and correctness:
+Beyond the base schema in `spec.md §5`, these fields are required for production-quality observability and correctness:
 
 ```python
-# Idempotency on send
-send_idempotency_key: str           # set once at entry; used by Send to deduplicate retries
-sent_message_id: Optional[str]      # populated after MCP returns; presence == "already sent"
+# Routing inputs (drive the Channel Router and gates)
+customer_tier: str                   # Free / SMB / Enterprise (from CRM)
+risk_level: str                      # none / financial / legal / compliance
+policy_matches: list                 # ["ACME 4.2.1", "ACME 7.1"] — KB sections that triggered escalation
+
+# Real I/O channels (email + Slack)
+email_thread_id: str                 # original customer email RFC-822 Message-ID; used for In-Reply-To + References threading
+slack_channel: str                   # which channel the approval went to (e.g. "#support-complaints")
+slack_message_ts: str                # Slack message timestamp; used to update / resume on the right msg
+
+# Idempotency on send (app-layer, not SMTP-layer)
+send_idempotency_key: str            # set once at entry; lookup key for the dedupe check
+sent_message_id: Optional[str]       # populated after SMTP returns; presence == "already sent" — Send node skips if set
 
 # Cost / token tracking
-cost_breakdown: dict                # {classify: 0.0001, draft: 0.0008, ...}
+cost_breakdown: dict                 # {classify: 0.0001, draft: 0.0008, ...}
 total_tokens: int
 total_cost_usd: float
 
 # Long-pause edge cases
-ticket_external_status: str         # open / closed_by_customer / superseded
+ticket_external_status: str          # open / closed_by_customer / superseded
 sla_deadline: datetime
 
 # Loop guards
-human_rejection_count: int          # increments on each rejection; >= 3 routes to manual_queue
-send_retry_count: int               # increments on each transient send failure; >= 3 routes to failed_manual
+human_rejection_count: int           # increments on each rejection; >= 3 routes to manual_queue
+rejection_reason: Optional[str]      # free-text from Slack reject modal; carried into next Draft as context
+send_retry_count: int                # increments on each transient send failure; >= 3 routes to failed_manual
 ```
+
+### Tunable thresholds (env vars)
+
+| Env var | Default | What it controls |
+|---|---|---|
+| `REVALIDATE_THRESHOLD_MIN` | 15 | Minutes after which an approval triggers context revalidation before send |
+| `MAX_HUMAN_REJECTIONS` | 3 | Reject count that flips redraft loop to Manual Queue |
+| `MAX_SEND_RETRIES` | 3 | Transient-failure retry cap before `failed_manual` |
+| `SLA_DEADLINE_HOURS` | 24 | Hours of human silence before SLA expires to Manual Queue |
+| `IMAP_POLL_INTERVAL_SEC` | 30 | Polling fallback when IMAP IDLE is unavailable |
 
 ## LangSmith tagging
 
@@ -380,26 +401,42 @@ Every trace is tagged with the following so the LangSmith UI supports failure-sl
 
 These tags drive the README's failure-slice table — break down accuracy by `intent + risk_flags` and you see exactly where v1 → v2 → v3 improvements landed.
 
+## Eval data
+
+The eval suite runs against the **Bitext Customer Support dataset** (50-ticket sample: 40 dev / 10 holdout). Five evaluators run via LangSmith:
+1. Intent accuracy (exact-match against labels)
+2. Response quality (LLM-as-judge with rubric)
+3. Escalation precision (did the two-gate router send to human correctly?)
+4. **False auto-send rate** — primary safety metric, target 0%
+5. Failure slice analysis — accuracy broken down by `intent × risk_flags × confidence_bucket`
+
 ## How this maps to the codebase
 
 | Diagram region | Files |
 |---|---|
+| Email Listener (IMAP IDLE / poll) | `src/email_listener.py` |
 | PII redact + restore middleware | `src/pii.py` |
-| Classify, Retrieve, Draft, Summarize Changes, Finalize, Audit nodes | `src/nodes.py` |
+| Classify, Enrich Context, Draft, Summarize Changes, Finalize, Audit nodes | `src/nodes.py` |
 | Policy + Confidence routing, rejection-count guard | `src/policy.py` |
+| Channel Router with priority overrides (legal > enterprise+risk > angry > intent) | `src/slack_router.py` |
 | Interrupt + checkpointer wiring | `src/graph.py` |
-| Approval UI + endpoints + delta panel rendering | `src/server.py` + `ui/approve.html` |
-| MCP **read** server | `mcp_server/support_read.py` |
-| MCP **write** server | `mcp_server/support_write.py` |
-| MCP client (routes calls to correct server) | `src/mcp_client.py` |
-| LangSmith tracing decorators | `src/llm.py` |
+| FastAPI server + Slack webhook signature verification + edit modal fallback | `src/server.py` + `src/slack_handler.py` + `ui/edit.html` |
+| MCP **Read** server (CRM + KB) | `mcp_server/support_read.py` |
+| MCP **Email Write** server (Gmail SMTP, idempotent) | `mcp_server/support_email_write.py` |
+| MCP **Slack Write** server (post / update / views.open) | `mcp_server/support_slack_write.py` |
+| MCP client (routes calls to correct capability-isolated server) | `src/mcp_client.py` |
+| LLM client + LangSmith tracing decorators | `src/llm.py` |
+| ACME SaaS Co fictional policy corpus | `data/acme_policies.md` |
+| Mock customer DB (Salesforce-shape) | `data/customers_seed.json` |
+| Bitext eval dataset (50-ticket sample) | `data/bitext_sample.csv` |
 | Restart / resume integration test | `tests/test_resume.py` |
 
 ## Future work
 
 - **Human edits as a golden dataset** — accumulated `(original_draft, final_draft)` pairs from the audit log become a high-signal fine-tuning or prompt-tuning corpus for the drafter. Run weekly: compute `edit_distance` per intent, surface drift, feed back into prompt iteration. This is the v4 narrative.
 - **Postgres for production** — SQLite checkpointer is single-writer; Postgres supports concurrent agents and cross-region replicas.
-- **Slack approval channel** — extend the Approval UI to a Slack interactive message for on-call workflows.
+- **Webhook-based inbound mail** — replace IMAP IDLE listener with SES / SendGrid Inbound Parse / Postmark for sub-second latency at scale without keepalive overhead.
 - **Online evals** — currently 50-ticket offline; add a sampling layer that scores live traces in LangSmith so quality regressions are caught in production, not in retrospect.
 - **Multi-model routing** — cheap classifier model (Haiku-tier) for Gate 1 + expensive drafter (Sonnet-tier) for Step 4. Likely meaningful cost reduction on auto-send tickets; quantify after build.
 - **Admin debug view** — expose `graph.get_state()` / `graph.get_state_history()` to inspect any thread's full execution history during incident response.
+- **Real CRM / ticketing integration** — swap mock `support_read.py` for Salesforce/HubSpot API; swap email-direct entry for Zendesk Conversations API. MCP server replacement, no graph logic changes.
