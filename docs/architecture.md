@@ -1,5 +1,23 @@
 # HITL Customer Support Agent — Architecture
 
+> A production-style customer support system that combines LLM reasoning, deterministic policy enforcement, and human approval workflows with durable execution. Real email I/O, real multi-channel Slack approvals, fictional ACME SaaS Co policy corpus, three capability-isolated MCP servers.
+
+## System layers
+
+The runtime decomposes into seven layers. Each has a single responsibility; every other doc and the codebase folder structure mirror this split.
+
+| # | Layer | Responsibility | Where it lives |
+|---|---|---|---|
+| 1 | **Ingestion** | Pull customer email in, push reply email out | `src/email_listener.py` (IMAP) + MCP Email Write (SMTP) |
+| 2 | **Orchestration** | Sequence nodes, persist state, recover from crashes | `src/graph.py` (LangGraph + SQLite checkpointer) |
+| 3 | **Intelligence** | LLM calls — Classify, Draft, Summarize Changes | `src/llm.py` + `src/nodes.py` (OpenRouter / DeepSeek) |
+| 4 | **Policy** | Two-gate routing + channel selection + KB retrieval | `src/policy.py` + `src/slack_router.py` + ACME KB via MCP Read |
+| 5 | **HITL** | Slack notification, interrupt, action handler, edit modal | `src/server.py` + `src/slack_handler.py` + MCP Slack Write |
+| 6 | **Execution** | Finalize payload, idempotent send, audit log | `src/nodes.py` (Finalize / Send Email / Audit) |
+| 7 | **Observability** | Tracing, cost tracking, failure-slice tags | LangSmith decorators in `src/llm.py` |
+
+A swap at any layer is a config change, not a rewrite. Production deployment replaces Gmail/IMAP with SES, mock CRM with Salesforce, ACME corpus with the company's actual policy docs — graph logic doesn't change.
+
 ## End-to-end flow (the 30-second view)
 
 ```mermaid
@@ -38,19 +56,17 @@ flowchart TD
 ```mermaid
 flowchart TD
     Inbox([support@yourcompany.com<br/>Gmail inbox]):::email
-    Inbox --> Listener[Email Listener<br/>IMAP poll ~30s]:::node
+    Inbox --> Listener[Email Listener<br/>IMAP IDLE preferred<br/>poll ~30s as fallback]:::node
     Listener --> PII[PII Redact<br/>middleware]:::middleware
     PII --> Classify[Classify Intent<br/>intent + sentiment + risk_flags + risk_level]:::node
     Classify --> Enrich[Enrich Context<br/>CRM profile + history + ACME KB]:::node
     Enrich --> Draft[Draft Response]:::node
     Draft --> Policy{Policy Risk Check<br/>refund / angry / ACME policy match?}:::decision
 
-    Policy -->|risk detected| Interrupt[Interrupt Gate<br/>dedicated node, no side effects<br/>checkpointer persists at super-step]:::hitl
+    Policy -->|risk detected| Router{Channel Router<br/>priority overrides:<br/>1.legal > 2.enterprise+risk<br/>3.angry > 4.intent}:::decision
     Policy -->|no risk| Confidence{Confidence Check<br/>both confidences >= 0.85?}:::decision
-    Confidence -->|below threshold| Interrupt
+    Confidence -->|below threshold| Router
     Confidence -->|above threshold| Finalize
-
-    Interrupt --> Router{Channel Router<br/>priority overrides:<br/>1.legal > 2.enterprise+risk<br/>3.angry > 4.intent}:::decision
 
     Router -->|legal/compliance| ChLegal[#support-legal]:::slack
     Router -->|enterprise + risk| ChEnt[#support-enterprise]:::slack
@@ -61,22 +77,25 @@ flowchart TD
     ChEnt --> SlackPost
     ChCmp --> SlackPost
     ChIntent --> SlackPost
-    SlackPost[Slack Notification<br/>Block Kit message:<br/>customer card +<br/>Why I paused +<br/>ACME KB quote +<br/>Approve / Edit / Reject]:::ui
+    SlackPost[Slack Notification<br/>posts Block Kit message<br/>saves slack_message_ts<br/>NO interrupt yet]:::ui
 
-    SlackPost -->|reject button| RejectCheck{rejection_count >= 3?}:::decision
+    SlackPost --> Interrupt[Interrupt Gate<br/>dedicated node — only interrupt&#40;&#41;<br/>checkpointer persists at super-step<br/>resumes via webhook]:::hitl
+
+    Interrupt -->|webhook signature verified<br/>Command resume| Action{Action?}:::decision
+    Action -->|reject + reason| RejectCheck{rejection_count >= 3?}:::decision
+    Action -->|approve or edit| Elapsed{Approval delay > 15min?}:::decision
+
     RejectCheck -->|yes| ManualQueue[Manual Queue<br/>posts final status to channel,<br/>customer notified by email]:::terminal
-    RejectCheck -->|no, increment| Draft
-
-    SlackPost -->|approve or edit| Elapsed{Approval delay > 15min?}:::decision
+    RejectCheck -->|no, count++<br/>carry rejection_reason| Draft
 
     Elapsed -->|no| Finalize
     Elapsed -->|yes| Revalidate{Revalidate Context<br/>compare context_hash}:::decision
     Revalidate -->|hash unchanged| Finalize
     Revalidate -->|hash changed| Summarize[Summarize Changes<br/>compute delta]:::node
-    Summarize -->|posts delta update<br/>on same Slack message| SlackPost
+    Summarize -->|update_message:<br/>posts delta on same msg<br/>graph re-interrupts to wait| Interrupt
 
-    Finalize[Finalize Action<br/>PII restore +<br/>compose email payload<br/>+ In-Reply-To header]:::node
-    Finalize --> SendEmail[Send Email<br/>Gmail SMTP, idempotent<br/>on send_idempotency_key]:::node
+    Finalize[Finalize Action<br/>PII restore + compose payload<br/>+ In-Reply-To AND References headers<br/>+ Subject: Re: ... for threading]:::node
+    Finalize --> SendEmail[Send Email<br/>Gmail SMTP<br/>app-layer idempotency:<br/>skip if sent_message_id present]:::node
 
     SendEmail -. SMTP .-> CustInbox([Customer inbox<br/>reply threaded under original]):::email
     SendEmail --> Audit[Append-only audit log +<br/>LangSmith trace closes]:::terminal
@@ -84,7 +103,7 @@ flowchart TD
 
     Enrich -. read .-> MCPRead[(MCP Read Server<br/>get_crm_profile<br/>get_customer_history<br/>get_kb_article)]:::mcpread
     SendEmail -. write .-> MCPEmail[(MCP Email Write<br/>send_email via Gmail SMTP)]:::mcpemail
-    SlackPost -. write .-> MCPSlack[(MCP Slack Write<br/>post_approval_request<br/>update_message)]:::mcpslack
+    SlackPost -. write .-> MCPSlack[(MCP Slack Write<br/>post_approval_request<br/>update_message<br/>views.open for Edit modal)]:::mcpslack
     Summarize -. write .-> MCPSlack
     ManualQueue -. write .-> MCPSlack
 
@@ -103,15 +122,18 @@ flowchart TD
 
 ### Key design points
 
-- **Real email is the customer-facing I/O.** Gmail IMAP listener brings tickets in, Gmail SMTP delivers replies threaded under the original. Production swap → SendGrid/SES is an MCP server change, no graph logic change.
-- **Real Slack is the internal team I/O.** No web dashboard humans need to remember to check. Approvals live in the channel they already work in.
+- **Slack post happens BEFORE interrupt, never after.** Once `interrupt()` fires, execution pauses — nothing else in that node runs. The graph order is: `Channel Router → Slack Notification (posts message, saves ts) → Interrupt Gate (dedicated node, just calls interrupt())`. The webhook resumes the graph at the Interrupt Gate, then routes by action. Reversing this order is a flow-correctness bug that pauses forever with no Slack message ever sent.
+- **Real email is the customer-facing I/O.** Gmail IMAP IDLE (sub-second push) preferred; 30s polling as fallback. Gmail SMTP delivers replies threaded under the original — requires `In-Reply-To` AND `References` headers AND a matching `Subject: Re: ...` (Gmail uses all three). Production swap → SendGrid/SES is an MCP server change, no graph logic change.
+- **Real Slack is the internal team I/O.** No web dashboard humans need to remember to check. Approvals live in the channel they already work in. Edit opens a Slack modal via `views.open` (not a redirect to a separate web UI) — keeps the human in Slack throughout.
+- **Slack webhook signatures are verified, not trusted.** The FastAPI handler computes HMAC-SHA256 of `v0:{X-Slack-Request-Timestamp}:{raw body}` with the signing secret, compares to `X-Slack-Signature`, and rejects if mismatch or timestamp older than 5 minutes (replay defense). Without this, anyone who finds the webhook URL can fake an Approve.
 - **Channel routing is priority-ordered, not fuzzy.** `legal/compliance > enterprise+risk > angry > by-intent`. Documented in `slack_router.py` and unit-tested. Enterprise customers never get triaged in the Free-tier queue.
 - **Policy and confidence are separate gates.** A high-confidence refund still escalates. Order matters: policy first, confidence second — fast-fail on the cheaper check.
 - **Policies are real data, not hardcoded thresholds.** `data/acme_policies.md` is a fictional but rigorous policy corpus for ACME SaaS Co. The Policy Risk Check retrieves matching policy chunks via MCP and quotes them verbatim in the Slack approval. Production swap → company's actual policy docs in the same MCP shape.
-- **Revalidation is gated by elapsed time.** Fast approvals skip re-fetch. When `context_hash` changed during a long pause, `Summarize Changes` posts a delta update on the same Slack thread (not a silent redraft) so the approver re-decides with full info.
-- **Finalize is split from Send.** Finalize composes (PII restore + payload assembly + `In-Reply-To` header for email threading); Send executes the irreversible SMTP call. Send is idempotent on `send_idempotency_key`.
+- **Revalidation threshold (15 min) is a tunable engineering decision, not a magic number.** Sub-15min: customer state rarely changes meaningfully. Over 15min: meaningful chance of CRM updates (subscription change, new ticket, billing event). Threshold is config-driven and tunable per tenant. When `context_hash` changed during a long pause, `Summarize Changes` posts a delta `update_message` on the same Slack thread (not a silent redraft) so the approver re-decides with full info.
+- **Finalize is split from Send.** Finalize composes (PII restore + payload assembly + threading headers); Send executes the irreversible SMTP call.
+- **Send idempotency is application-layer, not protocol-layer.** SMTP itself does not deduplicate. Before each call, the Send node checks `sent_message_id` in state — if populated, skip. The `send_idempotency_key` is the lookup, the state field is the lock. This is what "idempotent send" actually means in code.
 - **State persistence is implicit, not localized to one node.** LangGraph's checkpointer persists state across the thread (`thread_id = ticket_id`). Full checkpoints save at super-step boundaries, with task-level writes preserved during super-steps for fault recovery. After a server restart, `slack_message_ts` lets resume target the exact Slack message the human sees.
-- **Reject paths are bounded.** First 1–2 rejections trigger redraft (`human_rejection_count++`); the 3rd routes to Manual Queue with a final Slack notice. Prevents infinite human-redraft loops.
+- **Reject paths capture the reason and bound the loop.** Reject button opens a small modal: *"Why? (optional)"*. The reason is stored as `rejection_reason` in state. Below 3 rejections → redraft uses the original ticket *plus the rejection reason* as additional context, posts the new draft as a Slack thread reply on the same message (preserves audit history). At 3 → Manual Queue with a final notice in the channel.
 - **MCP servers are split by capability into three.** Read (CRM + KB) cannot send. Email Write cannot post Slack. Slack Write cannot email. Prompt injection during retrieval cannot reach the customer's inbox or the Slack channel — blast radius bounded by server boundary.
 
 ## Implementation rules (LangGraph-specific)
@@ -133,6 +155,25 @@ The `interrupt()` call must be alone in its node. No DB writes, MCP calls, audit
 **Why:** Generic "robust error handling" patterns break HITL. It's tempting to wrap everything for safety, but the interrupt path must bubble up to the runtime.
 
 **Pattern:** Error handling lives in *other* nodes, not the interrupt node.
+
+## Failure modes — what happens when things go wrong
+
+Every failure has an explicit handling path. None are silent.
+
+| Failure | What the system does |
+|---|---|
+| Server crashes mid-pause | LangGraph SQLite checkpoint persists at the last super-step. On restart, the Slack message buttons still work — webhook resumes at the Interrupt Gate using `slack_message_ts`. State recovered exactly. |
+| SMTP transient failure | `send_retry_count++`. Up to 3 retries, all using the same `send_idempotency_key` (app-layer check on `sent_message_id` in state). After 3 → `failed_manual` → Manual Queue + Slack notice. |
+| No human responds in 1h | Agent re-pings the channel: *"⏰ Still pending — backup channel paged."* If still no response by `sla_deadline` (24h) → auto-escalate to Manual Queue. |
+| Customer sends follow-up email mid-pause | `ticket_external_status` flips to `superseded`. Old draft discarded. Slack message updates: *"⚠️ Customer replied — superseded, see ticket-XXXX."* Follow-up enters as new ticket. |
+| Customer cancels ticket externally | `ticket_external_status` flips to `cancelled`. Slack message updates: *"🚫 Customer cancelled — closing."* No send. |
+| Prompt injection in customer email | Read MCP server has no `send_email` and no `post_slack`. Even if a jailbreak fires during retrieval, the agent has no path to either I/O channel until the explicit Send / Slack Write nodes. Capability separation = bounded blast radius. |
+| Slack webhook signature mismatch | FastAPI handler returns 401, no resume happens. Logged as security event. |
+| Slack timestamp older than 5min | Replay attack defense. Rejected with 401. |
+| Human rejects 3 times | Auto-routes to Manual Queue. Slack message: *"🚦 3 rejections — manual queue."* Customer notified by email. |
+| LangSmith down | Agent continues. Traces buffer locally, replay when LangSmith returns. Observability outage does not break user flow. |
+| LLM rate-limited or timing out | Single retry with backoff. Second failure → escalate to human (treat as low confidence). |
+| Hash unchanged but human delays >24h | SLA expires anyway. Manual Queue. Time-based override of staleness check. |
 
 ## Color legend
 
@@ -233,11 +274,17 @@ sequenceDiagram
 
     G->>G: Policy risk check
     Note over G: Refund detected → escalate (skip confidence check)
-    G->>H: Approval request (FastAPI endpoint)
+    G->>G: Channel Router (priority overrides) → #support-refunds
+    G->>MW: post_approval_request (Block Kit, channel selected)
+    Note over MW: Slack Write Server (capability-isolated)
+    MW-->>G: slack_message_ts saved to state
+    G->>G: Interrupt Gate (dedicated node) — calls interrupt(), pauses
 
     Note over G,H: --- agent paused ---<br/>server can be killed and restarted here<br/>state recovered from DB on next call
 
-    H->>G: Approve (or Edit + Approve)
+    H->>G: Click Approve in Slack (button)
+    Note over G: FastAPI handler verifies HMAC-SHA256 signature<br/>(timestamp <5min check)
+    G->>G: Command(resume=approve) → graph wakes at Interrupt Gate
 
     alt elapsed > 15 min
         G->>MR: Re-fetch context

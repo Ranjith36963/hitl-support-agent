@@ -79,13 +79,25 @@ The README explicitly documents this split so reviewers see strategic mocking �
 
 ## 4. Architecture
 
-> Full Mermaid renderings live in `docs/architecture.md` (simple 30-second view + detailed flow + sequence + state machine). This section is the spec-level summary.
+> Full Mermaid renderings live in `docs/architecture.md` (simple 30-second view + detailed flow + sequence + state machine). End-to-end product narrative lives in `HOW_IT_WORKS.md`. This section is the spec-level summary.
 
-### Graph flow (v3 — real email + Slack channel routing)
+### System layers
+
+| # | Layer | Responsibility |
+|---|---|---|
+| 1 | Ingestion | IMAP in / SMTP out (Gmail) |
+| 2 | Orchestration | LangGraph + SQLite checkpointer (durable execution) |
+| 3 | Intelligence | LLM calls — Classify, Draft, Summarize Changes |
+| 4 | Policy | Two-gate routing + channel selection + ACME KB retrieval |
+| 5 | HITL | Slack notification, interrupt, action handler, edit modal |
+| 6 | Execution | Finalize, idempotent send, audit log |
+| 7 | Observability | LangSmith tracing, cost tracking, failure-slice tags |
+
+### Graph flow (v3 — corrected ordering: Slack post BEFORE interrupt)
 
 ```
 support@yourcompany.com  (real Gmail inbox)
-    ↓ IMAP listener polls every ~30s
+    ↓ IMAP IDLE (preferred) or 30s poll fallback
 [Email Listener] → builds ticket {ticket_id, email_thread_id, from, subject, body}
     ↓
 [PII Redact] ← middleware (emails, CCs, phones → tokens)
@@ -101,7 +113,7 @@ support@yourcompany.com  (real Gmail inbox)
     ↓
 [Policy Risk Check]  ◇  ── risk detected ──────────────────┐
     ↓ no risk                                              ↓
-[Confidence Check]   ◇  ── below 0.85 ──────────────→ [Interrupt Gate]
+[Confidence Check]   ◇  ── below 0.85 ─────────────────────┤
     ↓ above threshold                                       ↓
     ↓                                              [Channel Router]  (priority overrides)
     ↓                                              1. legal/compliance → #support-legal
@@ -111,40 +123,56 @@ support@yourcompany.com  (real Gmail inbox)
     ↓                                                                     technical, billing}
     ↓                                                       ↓
     ↓                                              [Slack Notification]  ── posts via ──>
-    ↓                                              [MCP SLACK Server]
+    ↓                                              [MCP SLACK WRITE Server]
+    ↓                                                  Block Kit message saved with
+    ↓                                                  slack_message_ts in state
     ↓                                                       ↓
-    ↓                                              Block Kit message:
-    ↓                                                • ticket summary + customer card
-    ↓                                                • "Why I paused" + ACME KB quote
-    ↓                                                • draft (expandable)
-    ↓                                                • [Approve][Edit][Reject]
+    ↓                                              [Interrupt Gate]  (dedicated node)
+    ↓                                                  Only calls interrupt().
+    ↓                                                  No side effects.
+    ↓                                                  Checkpoint persists at super-step.
+    ↓                                                       ↓
+    ↓                                              ─── PAUSE ───
+    ↓                                                       ↓
+    ↓                                              FastAPI webhook receives
+    ↓                                              Slack button click.
+    ↓                                              Verifies HMAC-SHA256 signature
+    ↓                                              and timestamp <5min.
+    ↓                                              Issues Command(resume=action).
     ↓                                                       ↓
     ↓                                              ┌────────┼────────┐
     ↓                                              ↓        ↓        ↓
-    ↓                                          reject    approve   edit (modal/web)
+    ↓                                          reject    approve   edit (Slack views.open
+    ↓                                          + reason             modal; on save → resume)
     ↓                                              ↓        ↓        ↓
     ↓                                       [Reject Check ◇]         ↓
     ↓                                          ↓ count<3 → loop to Draft
+    ↓                                          ↓             (carries rejection_reason
+    ↓                                          ↓              as redraft context)
     ↓                                          ↓ count≥3 → [Manual Queue]
     ↓                                                       ↓
-    ↓                                              [Elapsed > 15min? ◇]
+    ↓                                              [Elapsed > 15min? ◇]   (config-driven)
     ↓                                                       ↓ yes
     ↓                                              [Revalidate context_hash ◇]
     ↓                                                       ↓ hash changed
     ↓                                              [Summarize Changes]
-    ↓                                                       ↓ posts delta update on
-    ↓                                                       ↓ same Slack message → re-decide
+    ↓                                                       ↓ update_message: posts
+    ↓                                                       ↓ delta on same Slack msg
+    ↓                                                       ↓ → re-interrupts to wait
     ↓                                                       ↓ hash unchanged / re-confirmed
     └───────────────────────────────────────────────────────┴──→ [Finalize Action]
-                                                                  (PII restore + email payload
-                                                                   with In-Reply-To header)
+                                                                  (PII restore + payload
+                                                                   + In-Reply-To AND References
+                                                                   + Subject: Re: ...)
                                                                        ↓
-                                                              [Send Email] ── calls ──>
-                                                              [MCP EMAIL WRITE Server]
-                                                                  (Gmail SMTP, idempotent on
-                                                                   send_idempotency_key)
+                                                              [Send Email]
+                                                                  (Gmail SMTP via MCP Email
+                                                                   Write Server.
+                                                                   App-layer idempotency:
+                                                                   skip if sent_message_id
+                                                                   already in state.)
                                                                        ↓
-                                                              Slack message updated:
+                                                              update_message:
                                                               "📤 Reply sent to <customer>"
                                                                        ↓
                                                               [Append-only audit log +
@@ -155,6 +183,8 @@ support@yourcompany.com  (real Gmail inbox)
                                               support@yourcompany.com  ──[real SMTP]──> customer inbox
                                                                        (threaded under original)
 ```
+
+**Critical ordering note:** Slack Notification runs BEFORE Interrupt Gate. Once `interrupt()` fires, execution pauses — nothing in that node runs after. Posting to Slack must happen first (its own node), then the Interrupt Gate (dedicated node that does only the pause). Reversing this order is a flow-correctness bug that pauses forever with no Slack message ever posted.
 
 ### Routing rules — two sequential gates, not one fuzzy router
 
@@ -223,6 +253,7 @@ class AgentState(TypedDict):
 
     # Loop guards (prevent infinite retries / rejections)
     human_rejection_count: int           # increments on each rejection; >= 3 routes to manual_queue
+    rejection_reason: Optional[str]      # free-text from Slack reject modal; carried into next Draft as context
     send_retry_count: int                # increments on each transient send failure; >= 3 routes to failed_manual
 
     # Long-pause edge cases
@@ -245,8 +276,10 @@ class AgentState(TypedDict):
 
 ### Email Listener (entry point)
 
-- Background task: polls `support@yourcompany.com` (Gmail) via IMAP every ~30s
-- Production swap: webhook (SendGrid Inbound Parse / Postmark) — note in README
+- Background task on `support@yourcompany.com` (Gmail). **Two modes:**
+  - **Preferred:** IMAP IDLE — Gmail pushes a notification within ~1s of new mail. Implementation: `imaplib`'s IDLE keepalive loop, or `aioimaplib` for async.
+  - **Fallback:** poll every ~30s if IDLE connection drops or is unsupported. The 30s figure is a fallback ceiling, not a target.
+- **Production swap:** webhook-based (SendGrid Inbound Parse / Postmark / SES) for sub-second latency at scale. Swap is an MCP server change. Note in README.
 - Each new email → builds a `ticket` object: `{ticket_id, email_thread_id, from, subject, body, received_at}`
 - Pushes ticket into the LangGraph entry node
 - `email_thread_id` (RFC-822 Message-ID) saved in state so the eventual reply threads correctly in the customer's inbox
@@ -330,23 +363,29 @@ Writes `slack_channel` to state. This deterministic routing logic lives in `src/
 
 ### Slack Action Handler (FastAPI webhook)
 
-- Receives Slack button clicks via Bolt SDK
-- Verifies Slack signing secret
-- Routes:
+- Receives Slack button clicks at `/slack/events` (Bolt SDK)
+- **Signature verification (security boundary, not optional):**
+  1. Read `X-Slack-Request-Timestamp` header
+  2. Read raw request body (do not parse first — must hash bytes that arrived)
+  3. Compute `HMAC-SHA256(signing_secret, "v0:" + timestamp + ":" + body)`
+  4. Compare to `X-Slack-Signature` header (constant-time compare)
+  5. Reject with 401 if mismatch OR if timestamp is older than 5 minutes (replay-attack defense)
+- Routes after verification:
   - **Approve** → `Command(resume="approve")` resumes graph
-  - **Edit** → opens a Slack modal (or links to `ui/edit.html`); on save, `final_draft` updates and `Command(resume="edit")` resumes
-  - **Reject** → increments `human_rejection_count`, then `Command(resume="reject")`
-- After each action, updates the original Slack message in place with status (`✅ Approved by @user · 22 sec`)
+  - **Edit** → opens a Slack modal via `views.open` (keeps human in Slack — preferred over redirecting to `ui/edit.html`); on modal submit, `final_draft` updates and `Command(resume="edit")` resumes
+  - **Reject** → opens a brief modal with optional "Why?" text field, captures `rejection_reason` to state, increments `human_rejection_count`, then `Command(resume="reject")`
+- After each action, calls `update_message` on the Slack Write Server to update the original message in place: `✅ Approved by @user · 22 sec` / `✏️ Edited & approved by @user · 47 sec` / `↩️ Rejected by @user — redrafting (2/3)`
 
 ### Reject Check
 
 - Conditional edge on `human_rejection_count`
-- If `count < 3` → loop back to Draft Response (increments count, re-drafts with rejection feedback)
-- If `count >= 3` → Manual Queue (terminal)
+- If `count < 3` → loop back to Draft Response. The Draft node reads `rejection_reason` from state and incorporates it as additional context (e.g., *"The previous draft was rejected because: '<reason>'. Address that concern in the new draft."*). Increments `human_rejection_count`. The new draft is posted as a Slack thread reply on the *same* original message (preserves audit history visible to the team).
+- If `count >= 3` → Manual Queue (terminal). Slack message gets a final `update_message`: *"🚦 3 rejections — manual queue."*
 
 ### Elapsed Check
 
 - Conditional edge on `(now - approval_request_time) > 15 min`
+- **15-minute threshold is a tunable engineering decision, not a magic number.** It balances revalidation cost (extra MCP calls + LLM call) against staleness risk (customer state changing during the wait). Sub-15min: state rarely changes meaningfully. Over 15min: meaningful chance of CRM updates (subscription change, new ticket, billing event). Threshold is config-driven (`REVALIDATE_THRESHOLD_MIN` env var) and tunable per tenant.
 - If no → Finalize Action (skip revalidation)
 - If yes → Revalidate Context
 
@@ -374,11 +413,18 @@ Writes `slack_channel` to state. This deterministic routing logic lives in `src/
 ### Send Email (real Gmail SMTP)
 
 - Calls MCP **EMAIL WRITE** server's `send_email` tool — uses Gmail SMTP from `support@yourcompany.com`
-- Reply includes `In-Reply-To: <email_thread_id>` so it threads under the customer's original email in their inbox
-- Idempotent on `send_idempotency_key` — re-running the graph cannot double-send
+- **Threading requires three things together** (Gmail uses all of them; missing any one breaks threading intermittently):
+  1. `In-Reply-To: <original_message_id>`
+  2. `References: <original_message_id>` (and any prior thread IDs concatenated)
+  3. `Subject: Re: <original subject>` (must start with `Re: ` to match)
+- **App-layer idempotency** — SMTP itself does not deduplicate. Before each call:
+  1. Check if `sent_message_id` is already populated in state.
+  2. If yes → skip the send, return cached `sent_message_id`.
+  3. If no → call SMTP, save returned `sent_message_id`.
+  The `send_idempotency_key` is the lookup; the state field is the lock.
 - `send_status`: pending → in_flight → sent
 - Transient failures retry up to 3 times; after that → `failed_manual` → Manual Queue
-- After successful send, updates the Slack approval message: *"📤 Reply sent to <customer> · 14:05:30"*
+- After successful send, calls `update_message` on the Slack approval message: *"📤 Reply sent to <customer> · 14:05:30"*
 
 ### Log Audit
 
