@@ -1,0 +1,41 @@
+# Core orchestration
+langgraph>=0.2.50
+langgraph-checkpoint-sqlite>=2.0.0
+langchain-core>=0.3.0
+langsmith>=0.1.140
+
+# LLM (OpenRouter is OpenAI-compatible)
+openai>=1.50.0
+
+# Web server + Slack
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+slack-bolt>=1.21.0
+
+# Email I/O
+aioimaplib>=1.1.0
+aiosmtplib>=3.0.0
+
+# Slack SDK
+slack-sdk>=3.33.0
+
+# Async SQLite (idempotency store)
+aiosqlite>=0.20.0
+
+# MCP servers
+mcp>=1.2.0
+
+# Settings + validation
+pydantic>=2.9.0
+pydantic-settings>=2.6.0
+python-dotenv>=1.0.1
+
+# Eval data
+pandas>=2.2.0
+datasets>=3.0.0
+
+# Dev
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
+mypy>=1.13.0
+ruff>=0.7.0

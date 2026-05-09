@@ -1,0 +1,249 @@
+[
+  {
+    "customer_id": "C-0001",
+    "customer_email": "alice.morgan@freemail.io",
+    "customer_name": "Alice Morgan",
+    "customer_tier": "Free",
+    "company": null,
+    "contract_value": 0,
+    "renewal_date": null,
+    "billing_status": "none",
+    "payment_method": null,
+    "joined": "2024-09-15",
+    "account_status": "active",
+    "open_tickets": 1,
+    "ticket_history": [
+      {
+        "ticket_id": "TK-1001",
+        "date": "2025-03-10",
+        "intent": "FAQ",
+        "summary": "Asked how to export data to CSV.",
+        "resolution": "auto_sent",
+        "sentiment": "neutral"
+      }
+    ],
+    "notes": "Single-user free plan. No payment on file."
+  },
+  {
+    "customer_id": "C-0002",
+    "customer_email": "bob.chen@startupco.com",
+    "customer_name": "Bob Chen",
+    "customer_tier": "SMB",
+    "company": "StartupCo Inc.",
+    "contract_value": 1800,
+    "renewal_date": "2026-01-31",
+    "billing_status": "current",
+    "payment_method": "credit_card",
+    "joined": "2024-03-01",
+    "account_status": "active",
+    "open_tickets": 0,
+    "ticket_history": [
+      {
+        "ticket_id": "TK-2001",
+        "date": "2025-01-08",
+        "intent": "billing",
+        "summary": "Queried overage charge of $45 in December.",
+        "resolution": "escalated_approved",
+        "sentiment": "neutral"
+      },
+      {
+        "ticket_id": "TK-2002",
+        "date": "2025-02-14",
+        "intent": "technical",
+        "summary": "Webhook delivery failures to their internal endpoint.",
+        "resolution": "auto_sent",
+        "sentiment": "neutral"
+      }
+    ],
+    "notes": "5-seat SMB plan. Annual billing. Good payment history."
+  },
+  {
+    "customer_id": "C-0003",
+    "customer_email": "diana.reeves@megacorp.com",
+    "customer_name": "Diana Reeves",
+    "customer_tier": "Enterprise",
+    "company": "MegaCorp Ltd.",
+    "contract_value": 48000,
+    "renewal_date": "2025-12-01",
+    "billing_status": "current",
+    "payment_method": "invoice_net30",
+    "joined": "2022-07-20",
+    "account_status": "active",
+    "open_tickets": 2,
+    "ticket_history": [
+      {
+        "ticket_id": "TK-3001",
+        "date": "2024-11-05",
+        "intent": "refund",
+        "summary": "Requested partial refund of $1,200 for unused seats Q3.",
+        "resolution": "escalated_approved",
+        "policy_applied": "ACME 4.2.3",
+        "sentiment": "neutral"
+      },
+      {
+        "ticket_id": "TK-3002",
+        "date": "2025-01-22",
+        "intent": "technical",
+        "summary": "SSO configuration failure affecting 40+ users.",
+        "resolution": "escalated_approved",
+        "sla_breached": false,
+        "sentiment": "neutral"
+      },
+      {
+        "ticket_id": "TK-3003",
+        "date": "2025-04-10",
+        "intent": "billing",
+        "summary": "Invoice discrepancy — billed for 50 seats, contract specifies 45.",
+        "resolution": "escalated_approved",
+        "policy_applied": "ACME 6.3.1",
+        "sentiment": "neutral"
+      }
+    ],
+    "notes": "45-seat Enterprise plan. Dedicated CSM. Up for renewal Dec 2025."
+  },
+  {
+    "customer_id": "C-0004",
+    "customer_email": "frank.iordache@grumpyuser.net",
+    "customer_name": "Frank Iordache",
+    "customer_tier": "SMB",
+    "company": "Iordache Consulting",
+    "contract_value": 3600,
+    "renewal_date": "2025-11-15",
+    "billing_status": "past_due",
+    "payment_method": "credit_card",
+    "joined": "2023-11-15",
+    "account_status": "at_risk",
+    "open_tickets": 3,
+    "ticket_history": [
+      {
+        "ticket_id": "TK-4001",
+        "date": "2025-02-01",
+        "intent": "complaint",
+        "summary": "Expressed frustration about UI changes breaking their workflow.",
+        "resolution": "escalated_rejected_x1_then_approved",
+        "sentiment": "angry"
+      },
+      {
+        "ticket_id": "TK-4002",
+        "date": "2025-03-20",
+        "intent": "refund",
+        "summary": "Demanded full refund of $300 for a month of downtime he claimed.",
+        "resolution": "escalated_approved_partial",
+        "policy_applied": "ACME 4.2.2",
+        "sentiment": "angry"
+      },
+      {
+        "ticket_id": "TK-4003",
+        "date": "2025-04-30",
+        "intent": "billing",
+        "summary": "Disputed auto-renewal charge; claimed he cancelled.",
+        "resolution": "pending",
+        "sentiment": "angry"
+      }
+    ],
+    "notes": "High-churn risk. Payment overdue 18 days. Escalation history. Handle with care."
+  },
+  {
+    "customer_id": "C-0005",
+    "customer_email": "priya.nair@techbridge.io",
+    "customer_name": "Priya Nair",
+    "customer_tier": "SMB",
+    "company": "TechBridge Solutions",
+    "contract_value": 7200,
+    "renewal_date": "2026-03-31",
+    "billing_status": "current",
+    "payment_method": "credit_card",
+    "joined": "2023-05-10",
+    "account_status": "active",
+    "open_tickets": 0,
+    "ticket_history": [
+      {
+        "ticket_id": "TK-5001",
+        "date": "2025-01-15",
+        "intent": "technical",
+        "summary": "Integration with Zapier not triggering on new records.",
+        "resolution": "auto_sent",
+        "sentiment": "neutral"
+      },
+      {
+        "ticket_id": "TK-5002",
+        "date": "2025-03-02",
+        "intent": "FAQ",
+        "summary": "Asked about GDPR data residency options.",
+        "resolution": "escalated_approved",
+        "policy_applied": "ACME 9.2.1",
+        "sentiment": "neutral"
+      }
+    ],
+    "notes": "12-seat SMB. GDPR-sensitive (EU data residency). Healthy account."
+  },
+  {
+    "customer_id": "C-0006",
+    "customer_email": "sam.oduya@nonprofit.org",
+    "customer_name": "Sam Oduya",
+    "customer_tier": "Free",
+    "company": "OpenDoor Nonprofit",
+    "contract_value": 0,
+    "renewal_date": null,
+    "billing_status": "none",
+    "payment_method": null,
+    "joined": "2025-01-20",
+    "account_status": "active",
+    "open_tickets": 1,
+    "ticket_history": [
+      {
+        "ticket_id": "TK-6001",
+        "date": "2025-02-28",
+        "intent": "FAQ",
+        "summary": "Asked whether nonprofit discount program is available.",
+        "resolution": "auto_sent",
+        "sentiment": "positive"
+      }
+    ],
+    "notes": "New free user. Potential upgrade to SMB via nonprofit program."
+  },
+  {
+    "customer_id": "C-0007",
+    "customer_email": "leo.strauss@globalenterprise.com",
+    "customer_name": "Leo Strauss",
+    "customer_tier": "Enterprise",
+    "company": "GlobalEnterprise AG",
+    "contract_value": 120000,
+    "renewal_date": "2025-09-01",
+    "billing_status": "current",
+    "payment_method": "invoice_net60",
+    "joined": "2020-04-01",
+    "account_status": "active",
+    "open_tickets": 1,
+    "ticket_history": [
+      {
+        "ticket_id": "TK-7001",
+        "date": "2024-09-12",
+        "intent": "technical",
+        "summary": "Bulk import of 10,000+ records timing out via API.",
+        "resolution": "escalated_approved",
+        "sla_breached": false,
+        "sentiment": "neutral"
+      },
+      {
+        "ticket_id": "TK-7002",
+        "date": "2025-01-10",
+        "intent": "billing",
+        "summary": "Requested updated invoice format with VAT number for German compliance.",
+        "resolution": "escalated_approved",
+        "policy_applied": "ACME 6.4.1",
+        "sentiment": "neutral"
+      },
+      {
+        "ticket_id": "TK-7003",
+        "date": "2025-04-22",
+        "intent": "refund",
+        "summary": "Requested credit of $2,400 for implementation delays caused by ACME platform.",
+        "resolution": "escalated_pending",
+        "policy_applied": "ACME 4.2.3",
+        "sentiment": "neutral"
+      }
+    ],
+    "notes": "100-seat flagship Enterprise account. Up for renewal Sep 2025. High-value, handle escalations with VP-level involvement per ACME 10.1."
+  }
+]
