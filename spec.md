@@ -52,10 +52,28 @@ Skips weak signals:
 | LLM | OpenRouter (DeepSeek V3 free) |
 | State persistence | SQLite (Postgres mode documented) |
 | Backend | FastAPI |
-| Approval UI | Simple HTML/JS |
-| Tool integration | MCP (custom server) |
-| Dataset | Bitext Customer Support |
+| Customer I/O (inbound + outbound) | **Real email — Gmail IMAP + SMTP** |
+| Internal approval channel | **Real Slack** with multi-channel routing (Bolt SDK + Block Kit) |
+| Edit fallback UI | Minimal HTML/JS (only opened from the Slack "Edit" button) |
+| Tool integration | MCP (custom servers, split read/write) |
+| Policy corpus | Fictional **ACME SaaS Co** policy docs (`data/acme_policies.md`) |
+| Eval dataset | Bitext Customer Support |
 | Build agent | Claude Code |
+
+### What's real vs mocked
+
+| Layer | Real | Mocked |
+|---|---|---|
+| Email I/O | Gmail IMAP (in) + SMTP (out) | — |
+| Approval channel | Slack workspace + multi-channel routing | — |
+| LangGraph + LangSmith | Full implementation | — |
+| MCP servers | Custom read + write servers | — |
+| Eval data | Bitext dataset | — |
+| Customer database / CRM | — | `data/customers_seed.json` (Salesforce-shape) |
+| Policy corpus | — | `data/acme_policies.md` (fictional ACME SaaS Co) |
+| Ticketing system | — | Direct email → LangGraph (no Zendesk) |
+
+The README explicitly documents this split so reviewers see strategic mocking — production swap is an MCP config change, not a rewrite.
 
 ---
 
@@ -63,38 +81,79 @@ Skips weak signals:
 
 > Full Mermaid renderings live in `docs/architecture.md` (simple 30-second view + detailed flow + sequence + state machine). This section is the spec-level summary.
 
-### Graph flow
+### Graph flow (v3 — real email + Slack channel routing)
 
 ```
-[Ticket In]
+support@yourcompany.com  (real Gmail inbox)
+    ↓ IMAP listener polls every ~30s
+[Email Listener] → builds ticket {ticket_id, email_thread_id, from, subject, body}
     ↓
-[PII Redact] ← middleware
+[PII Redact] ← middleware (emails, CCs, phones → tokens)
     ↓
-[Classify Intent] → intent + confidence + sentiment + risk_flags
+[Classify Intent] → intent + confidence + sentiment + risk_flags + risk_level
     ↓
-[Retrieve Context] ── calls ──> [MCP READ Server]
+[Enrich Context] ── calls ──> [MCP READ Server]
+    │                            • get_crm_profile (Salesforce-shape mock)
+    │                            • get_customer_history
+    │                            • get_kb_article (ACME policies, sentence quotes)
     ↓
 [Draft Response] → draft + draft_confidence
     ↓
-[Policy Risk Check]  ◇  ── risk detected ──┐
-    ↓ no risk                              ↓
-[Confidence Check]   ◇  ── below 0.85 ─→ [Interrupt Gate]
-    ↓ above threshold                      ↓
-    ↓                                  [Approval UI] ── reject ─→ [Reject Check ◇]
-    ↓                                      ↓ approve/edit         ↓ count<3 → loop to Draft
-    ↓                                  [Elapsed > 15min? ◇]       ↓ count≥3 → [Manual Queue]
-    ↓                                      ↓ yes
-    ↓                                  [Revalidate context_hash ◇]
-    ↓                                      ↓ hash changed
-    ↓                                  [Summarize Changes] → delta panel → back to Approval UI
-    ↓                                      ↓ hash unchanged
-    └──────────────────────────────────────┴──→ [Finalize Action] (PII restore + payload)
-                                                       ↓
-                                          [Send Response] ── calls ──> [MCP WRITE Server]
-                                                       ↓ idempotent on send_idempotency_key
-                                          [Append-only audit log + trace metadata]
-                                                       ↓
-                                                     [End]
+[Policy Risk Check]  ◇  ── risk detected ──────────────────┐
+    ↓ no risk                                              ↓
+[Confidence Check]   ◇  ── below 0.85 ──────────────→ [Interrupt Gate]
+    ↓ above threshold                                       ↓
+    ↓                                              [Channel Router]  (priority overrides)
+    ↓                                              1. legal/compliance → #support-legal
+    ↓                                              2. enterprise + risk → #support-enterprise
+    ↓                                              3. angry sentiment   → #support-complaints
+    ↓                                              4. by intent         → #support-{refunds,
+    ↓                                                                     technical, billing}
+    ↓                                                       ↓
+    ↓                                              [Slack Notification]  ── posts via ──>
+    ↓                                              [MCP SLACK Server]
+    ↓                                                       ↓
+    ↓                                              Block Kit message:
+    ↓                                                • ticket summary + customer card
+    ↓                                                • "Why I paused" + ACME KB quote
+    ↓                                                • draft (expandable)
+    ↓                                                • [Approve][Edit][Reject]
+    ↓                                                       ↓
+    ↓                                              ┌────────┼────────┐
+    ↓                                              ↓        ↓        ↓
+    ↓                                          reject    approve   edit (modal/web)
+    ↓                                              ↓        ↓        ↓
+    ↓                                       [Reject Check ◇]         ↓
+    ↓                                          ↓ count<3 → loop to Draft
+    ↓                                          ↓ count≥3 → [Manual Queue]
+    ↓                                                       ↓
+    ↓                                              [Elapsed > 15min? ◇]
+    ↓                                                       ↓ yes
+    ↓                                              [Revalidate context_hash ◇]
+    ↓                                                       ↓ hash changed
+    ↓                                              [Summarize Changes]
+    ↓                                                       ↓ posts delta update on
+    ↓                                                       ↓ same Slack message → re-decide
+    ↓                                                       ↓ hash unchanged / re-confirmed
+    └───────────────────────────────────────────────────────┴──→ [Finalize Action]
+                                                                  (PII restore + email payload
+                                                                   with In-Reply-To header)
+                                                                       ↓
+                                                              [Send Email] ── calls ──>
+                                                              [MCP EMAIL WRITE Server]
+                                                                  (Gmail SMTP, idempotent on
+                                                                   send_idempotency_key)
+                                                                       ↓
+                                                              Slack message updated:
+                                                              "📤 Reply sent to <customer>"
+                                                                       ↓
+                                                              [Append-only audit log +
+                                                               LangSmith trace closes]
+                                                                       ↓
+                                                                     [End]
+                                                                       ↓
+                                              support@yourcompany.com  ──[real SMTP]──> customer inbox
+                                                                       (threaded under original)
 ```
 
 ### Routing rules — two sequential gates, not one fuzzy router
@@ -138,12 +197,22 @@ class AgentState(TypedDict):
     final_draft: str
     draft_confidence: float
 
+    # Customer-tier-aware routing inputs
+    customer_tier: str                   # Free / SMB / Enterprise (from CRM)
+    risk_level: str                      # none / financial / legal / compliance
+    policy_matches: list                 # ["ACME 4.2.1", "ACME 7.1"] — KB sections that triggered escalation
+
     # Approval
     requires_approval: bool
     approval_status: str                 # pending/approved/edited/rejected/expired/cancelled/superseded
-    approver_id: str
+    approver_id: str                     # Slack user id of approver
     approval_timestamp: str
     sla_deadline: datetime
+
+    # I/O channels (real email + real Slack)
+    email_thread_id: str                 # original customer email Message-ID; used for In-Reply-To threading
+    slack_channel: str                   # which channel the approval went to (e.g. "#support-complaints")
+    slack_message_ts: str                # Slack message timestamp; used to update / resume on the right msg
 
     # Idempotency on send
     send_idempotency_key: str            # set once at entry; used by Send to deduplicate retries
@@ -174,6 +243,14 @@ class AgentState(TypedDict):
 
 ## 6. Nodes Detailed
 
+### Email Listener (entry point)
+
+- Background task: polls `support@yourcompany.com` (Gmail) via IMAP every ~30s
+- Production swap: webhook (SendGrid Inbound Parse / Postmark) — note in README
+- Each new email → builds a `ticket` object: `{ticket_id, email_thread_id, from, subject, body, received_at}`
+- Pushes ticket into the LangGraph entry node
+- `email_thread_id` (RFC-822 Message-ID) saved in state so the eventual reply threads correctly in the customer's inbox
+
 ### PII Redact (middleware)
 
 - Runs before any LLM call
@@ -183,16 +260,20 @@ class AgentState(TypedDict):
 
 ### Classify Intent
 
-- Input: customer message
-- Output: intent label + confidence + sentiment + risk_flags
+- Input: customer message (with PII redacted)
+- Output: intent label + `intent_confidence` + sentiment + `risk_flags` + `risk_level`
 - LLM call via OpenRouter
 - Intents: refund, technical, billing, complaint, FAQ, other
+- `risk_level` bucket: none / financial / legal / compliance (drives channel routing later)
 
-### Retrieve Context
+### Enrich Context (formerly Retrieve Context)
 
-- Calls MCP **READ** server only (`get_customer_history`, `get_kb_article`)
-- Returns: past tickets, relevant policy docs (with KB sentence quotes for justification)
-- Stores `context_hash` for stale-check later
+- Calls MCP **READ** server only — three tools, in parallel where possible:
+  - `get_crm_profile(customer_email)` → mock Salesforce-shape: `{customer_tier, contract_value, renewal_date, billing_status}`
+  - `get_customer_history(customer_email)` → past 90 days of tickets / interactions
+  - `get_kb_article(query)` → relevant chunks from `data/acme_policies.md` with full sentence quotes (used as the justification quote in Slack)
+- Writes `customer_tier` to state (drives channel routing later)
+- Stores `context_hash` (hash of all retrieved data) for the stale-check during long approval waits
 
 ### Draft Response
 
@@ -221,12 +302,41 @@ class AgentState(TypedDict):
 - LangGraph checkpointer persists state at super-step boundaries; this node just pauses execution
 - Resumes via `Command(resume=...)` from FastAPI approval endpoint
 
-### Approval UI
+### Channel Router (new — runs immediately after Interrupt Gate)
 
-- Renders the approval form (see §7 for layout)
-- Three actions: Approve / Edit & Approve / Reject
-- On reject → Reject Check (count-bounded; see below)
-- On approve/edit → Elapsed Check
+Picks the Slack channel using **priority-ordered overrides**. Higher priority wins when multiple match.
+
+| Priority | Condition | Channel |
+|---|---|---|
+| 1 (highest) | `risk_flags` contains `legal` or `compliance` | `#support-legal` |
+| 2 | `customer_tier == Enterprise` AND any `risk_flags` | `#support-enterprise` |
+| 3 | `sentiment == angry` | `#support-complaints` |
+| 4 (default) | route by `intent` | `#support-refunds` / `#support-technical` / `#support-billing` |
+
+Writes `slack_channel` to state. This deterministic routing logic lives in `src/slack_router.py` and is unit-tested.
+
+### Slack Notification (replaces single-channel "Approval UI")
+
+- Calls MCP **SLACK WRITE** server's `post_approval_request` tool
+- Posts a Block Kit message to the channel chosen by the router. Message contains:
+  - Ticket summary (customer email + 1-line subject)
+  - Customer card: `customer_tier`, contract value, history snapshot
+  - **"Why I paused"** panel: risk flags, confidence scores, `policy_matches`
+  - **KB justification quote** pulled from `retrieved_context` (verbatim ACME policy sentence)
+  - Draft reply (expandable section)
+  - Three action buttons: **Approve** · **Edit** · **Reject**
+- Saves `slack_message_ts` to state — used to update the message in place ("✅ Approved by @sarah") and to resume on the correct message after a server restart
+- LangGraph `interrupt()` is called *here, in this node, alone* — no other side effect (Implementation Rule 1)
+
+### Slack Action Handler (FastAPI webhook)
+
+- Receives Slack button clicks via Bolt SDK
+- Verifies Slack signing secret
+- Routes:
+  - **Approve** → `Command(resume="approve")` resumes graph
+  - **Edit** → opens a Slack modal (or links to `ui/edit.html`); on save, `final_draft` updates and `Command(resume="edit")` resumes
+  - **Reject** → increments `human_rejection_count`, then `Command(resume="reject")`
+- After each action, updates the original Slack message in place with status (`✅ Approved by @user · 22 sec`)
 
 ### Reject Check
 
@@ -261,12 +371,14 @@ class AgentState(TypedDict):
 - Assembles final payload (recipient, subject, body, idempotency key)
 - Hands off to Send Response
 
-### Send Response
+### Send Email (real Gmail SMTP)
 
-- Calls MCP **WRITE** server only (`send_email`)
+- Calls MCP **EMAIL WRITE** server's `send_email` tool — uses Gmail SMTP from `support@yourcompany.com`
+- Reply includes `In-Reply-To: <email_thread_id>` so it threads under the customer's original email in their inbox
 - Idempotent on `send_idempotency_key` — re-running the graph cannot double-send
 - `send_status`: pending → in_flight → sent
 - Transient failures retry up to 3 times; after that → `failed_manual` → Manual Queue
+- After successful send, updates the Slack approval message: *"📤 Reply sent to <customer> · 14:05:30"*
 
 ### Log Audit
 
@@ -278,7 +390,8 @@ class AgentState(TypedDict):
 ### Manual Queue (terminal)
 
 - Receives tickets from: rejection-count exceeded, SLA expired, send retries exhausted
-- Customer is notified that their ticket is being handled by a human
+- Posts a final message to the Slack channel: *"🚦 Routed to manual queue — needs human ownership."*
+- Customer is notified via auto-reply email that their ticket is being handled by a human
 - Audit entry logged before terminal exit
 
 ---
@@ -362,33 +475,41 @@ Human re-decides with the new information.
 
 ## 8. MCP Integration
 
-Build **TWO** custom MCP servers — split read vs write for least-privilege isolation:
+Build **THREE** custom MCP servers — split by capability for least-privilege isolation:
 
 ### MCP READ Server (`support_read.py`)
-- `get_customer_history(customer_id)` → past tickets
-- `get_kb_article(query)` → policy/KB docs (returns full sentence quotes for justification)
+- `get_crm_profile(customer_email)` → mock Salesforce-shape: tier, contract value, renewal, billing, history
+- `get_customer_history(customer_email)` → past 90-day interactions
+- `get_kb_article(query)` → ACME policy chunks with verbatim sentence quotes
 
-Connected to: **Retrieve Context** node and **Revalidate Context** node only.
+Connected to: **Enrich Context** node and **Revalidate Context** node only. Cannot send anything.
 
-### MCP WRITE Server (`support_write.py`)
-- `send_email(to, subject, body, idempotency_key)` → mock send
+### MCP EMAIL WRITE Server (`support_email_write.py`)
+- `send_email(to, subject, body, in_reply_to, idempotency_key)` → real Gmail SMTP send
 
-Connected to: **Send Response** node only.
+Connected to: **Send Email** node only. The only path to the customer's inbox.
 
-### Why split read vs write
+### MCP SLACK WRITE Server (`support_slack_write.py`)
+- `post_approval_request(channel, blocks)` → posts Block Kit message; returns `slack_message_ts`
+- `update_message(channel, ts, blocks)` → updates the same message in place (for "Approved by @x", delta panels, "Sent ✓")
 
-- **Prompt-injection defense.** If a malicious customer message smuggles instructions through the retrieved context, the agent at retrieval time has no path to `send_email`. A jailbreak during Retrieve cannot exfiltrate or send anything.
-- **Audit clarity.** Read calls are noisy and frequent; write calls are rare and high-stakes. Separating them makes the write log trivially auditable.
-- **2027 hiring signal.** Least-privilege at the tool layer is a real production pattern that most portfolio HITL projects skip.
+Connected to: **Slack Notification** node, **Summarize Changes** (delta update), **Send Email** (post-send confirmation), **Manual Queue** (final status).
+
+### Why split capabilities into three servers
+
+- **Prompt-injection defense.** A jailbreak during Enrich Context (Read server) has no path to either email or Slack. The agent literally cannot exfiltrate or send anything until the explicitly-named write nodes.
+- **Audit clarity.** Read calls are frequent and noisy. Email writes are rare and high-stakes (real customer impact). Slack writes are rare but internal-only. Separating them makes the email-send log trivially auditable.
+- **Capability decay safety.** A bug or hijack of the Slack write server cannot send a customer email. A bug in the email server cannot post in Slack. Blast radius is bounded by server boundary.
+- **2027 hiring signal.** Least-privilege at the tool layer with capability separation is a real production pattern. Most portfolio HITL projects expose all tools through one server.
 
 ### Why custom MCP servers (vs hardcoded SDK calls)
 
 - Shows you can BUILD MCP, not just consume
 - 17% of agent jobs already require MCP (April 2026 data); trending up for 2027
-- Splitting into two servers shows MCP composition, not just single-server usage
+- Composition into three servers shows real MCP architecture, not toy usage
 
 README line:
-> "Tools integrated via Model Context Protocol (MCP) — split into read and write servers for least-privilege isolation against prompt injection. Production pattern, not hardcoded SDK calls."
+> "Tools integrated via Model Context Protocol with capability separation: Read (CRM + KB) cannot write; Email Write cannot post Slack; Slack Write cannot email. Least-privilege isolation against prompt injection. Production pattern, not hardcoded SDK calls."
 
 ---
 
@@ -469,31 +590,41 @@ Numbers filled in AFTER actual eval runs. No fake metrics.
 support-agent/
 ├── README.md
 ├── requirements.txt
-├── .env.example
+├── .env.example                # GMAIL_USER, GMAIL_APP_PASSWORD, SLACK_BOT_TOKEN,
+│                               # SLACK_SIGNING_SECRET, OPENROUTER_API_KEY, LANGSMITH_API_KEY
 ├── data/
-│   └── bitext_sample.csv
+│   ├── bitext_sample.csv       # 50 eval tickets (40 dev / 10 holdout)
+│   ├── customers_seed.json     # mock CRM (Salesforce-shape) — customer profiles
+│   └── acme_policies.md        # fictional ACME SaaS Co policy corpus (refunds, cancellations, escalations)
 ├── mcp_server/
-│   ├── support_read.py         # MCP READ server: get_customer_history, get_kb_article
-│   └── support_write.py        # MCP WRITE server: send_email (least-privilege isolation)
+│   ├── support_read.py         # READ:  get_crm_profile, get_customer_history, get_kb_article
+│   ├── support_email_write.py  # WRITE: send_email (Gmail SMTP, idempotent)
+│   └── support_slack_write.py  # WRITE: post_approval_request, update_message (Block Kit)
 ├── src/
-│   ├── graph.py                # LangGraph workflow
-│   ├── nodes.py                # Node functions
-│   ├── state.py                # State schema
-│   ├── llm.py                  # OpenRouter client
-│   ├── policy.py               # Approval rules
-│   ├── pii.py                  # PII redaction
-│   ├── mcp_client.py           # MCP integration
-│   └── server.py               # FastAPI + UI
+│   ├── state.py                # AgentState TypedDict
+│   ├── graph.py                # LangGraph workflow + checkpointer
+│   ├── nodes.py                # Node functions (Classify, Enrich, Draft, Finalize, Audit, ...)
+│   ├── llm.py                  # OpenRouter client + LangSmith @traceable wrappers
+│   ├── policy.py               # Two-gate routing (Policy + Confidence)
+│   ├── slack_router.py         # Channel router with priority overrides
+│   ├── pii.py                  # PII redact + restore (used by Finalize)
+│   ├── email_listener.py       # IMAP poller → ticket creator
+│   ├── slack_handler.py        # FastAPI webhook for Slack button actions
+│   ├── mcp_client.py           # MCP client(s) routing to read / email-write / slack-write
+│   └── server.py               # FastAPI app: Slack webhooks + edit modal + health
 ├── eval/
-│   ├── dataset.py              # LangSmith dataset upload
-│   ├── evaluators.py           # Custom evals
-│   └── run_experiments.py      # v1/v2/v3 runs
+│   ├── dataset.py              # LangSmith dataset upload (Bitext)
+│   ├── evaluators.py           # 5 evaluators (intent, response, escalation, false-auto-send, slice)
+│   └── run_experiments.py      # v1 → v2 → v3 runs
 ├── ui/
-│   └── approve.html            # Approval interface
+│   └── edit.html               # minimal edit modal (only opened from Slack "Edit" button)
 ├── tests/
-│   └── test_resume.py          # Restart test
+│   ├── test_state.py           # state schema invariants
+│   ├── test_policy.py          # routing rules + slack_router priority overrides
+│   ├── test_pii.py             # redact + restore round-trip
+│   └── test_resume.py          # kill-server restart test
 └── demo/
-    └── demo_script.md          # 2-min video script
+    └── demo_script.md          # 2-min video script (real email → Slack → real email)
 ```
 
 ---
@@ -671,20 +802,26 @@ Never ship with these:
 
 Things most portfolios won't have:
 
-1. **Custom MCP servers, split read vs write** (least-privilege defense against prompt injection)
-2. **Two-gate routing** — separate Policy Risk and Confidence checks, not one fuzzy router
-3. **False auto-send rate** as primary safety metric
-4. **Approve-with-edits** flow with version history (both drafts in audit log)
-5. **Stale state revalidation** with delta panel — human re-decides on context change, not silent redraft
-6. **Bounded rejection loop** (3-strike rule routes to Manual Queue)
-7. **Idempotent send** with explicit `send_idempotency_key` — survives retries and resumes
-8. **PII masking middleware** with explicit Finalize-Action restoration
-9. **KB justification quote** in Approval UI — explainable AI, not "trust me"
-10. **Public LangSmith trace links** with full tag set for failure-slice analysis
-11. **Kill-server-resume** demo recorded
-12. **Implementation Rules** documented (interrupt() in dedicated node, no try/except)
+1. **Real email I/O** — actual Gmail IMAP listener (in) + SMTP send (out), threaded replies via `In-Reply-To`. Not mocked.
+2. **Real Slack with multi-channel routing** — `#support-refunds` / `-technical` / `-billing` / `-complaints` / `-enterprise` / `-legal`
+3. **Priority-ordered channel routing** (legal > enterprise+risk > angry > intent) — documented and unit-tested in `slack_router.py`
+4. **Three custom MCP servers with capability separation** — Read / Email Write / Slack Write, no single server has both read and send powers
+5. **Two-gate routing** — separate Policy Risk and Confidence checks, not one fuzzy router
+6. **ACME SaaS Co fictional policy corpus** (`data/acme_policies.md`) — shows policy-framework scaffolding skill, not just enforcement; RAG-retrieved at runtime
+7. **KB justification quote** in Slack approval — explainable AI, not "trust me"
+8. **Customer-tier-aware routing** — Enterprise customers get a senior channel, not the same queue as Free tier
+9. **False auto-send rate** as primary safety metric
+10. **Approve / Edit / Reject in Slack** — humans never leave their existing tool; Edit opens a Slack modal (or minimal web fallback)
+11. **Approve-with-edits** flow with version history (both drafts in audit log)
+12. **Stale state revalidation** with delta panel posted as Slack thread update — human re-decides on context change, not silent redraft
+13. **Bounded rejection loop** (3-strike rule routes to Manual Queue)
+14. **Idempotent send** with explicit `send_idempotency_key` — survives retries and resumes
+15. **PII masking middleware** with explicit Finalize-Action restoration
+16. **Public LangSmith trace links** with full tag set for failure-slice analysis
+17. **Kill-server-resume** demo recorded — Slack message resumes on the right `slack_message_ts`
+18. **Implementation Rules** documented (`interrupt()` in dedicated node, no try/except)
 
-Most projects skip nearly all of these. Hit 7+ and you're top 1–3%.
+Most projects skip nearly all of these. Hit 10+ and you're top 1%.
 
 ---
 
@@ -709,21 +846,24 @@ Document these as "future work" in README.
 
 Project is "done" when:
 
-- All graph nodes work end-to-end (PII Redact → Classify → Retrieve → Draft → Policy Gate → Confidence Gate → Interrupt → UI → Reject Check → Elapsed Check → Revalidate → Summarize Changes → Finalize → Send → Audit)
-- **Both** MCP servers (read + write) run and are called by the correct nodes
-- Approval UI shows the "Why I paused" panel with KB justification quote
-- Stale-context delta panel renders when `context_hash` changes during pause
-- Implementation Rules followed (interrupt() in dedicated node, no try/except wrapping)
-- Bounded rejection loop verified (3-strike → Manual Queue)
+- End-to-end loop works on a real email: `support@yourcompany.com` receives a real test email → agent processes → either auto-sends a real reply OR posts to the right Slack channel → human approves in Slack → real reply lands in customer's inbox threaded under the original
+- All graph nodes work end-to-end (Email Listener → PII Redact → Classify → Enrich → Draft → Policy Gate → Confidence Gate → Interrupt → Channel Router → Slack Notification → Reject Check → Elapsed Check → Revalidate → Summarize Changes → Finalize → Send Email → Audit)
+- **All three** MCP servers run and are called by the correct nodes (Read / Email Write / Slack Write)
+- Slack channel router correctly routes by priority (legal > enterprise+risk > angry > intent) — verified by `tests/test_policy.py`
+- Slack message shows the "Why I paused" panel with verbatim ACME KB justification quote
+- Approve / Edit / Reject buttons all work via Slack interactions
+- Stale-context delta posted as Slack message update when `context_hash` changes during pause
+- Implementation Rules followed (`interrupt()` in dedicated node, no try/except wrapping)
+- Bounded rejection loop verified (3-strike → Manual Queue posts final status to Slack)
 - Idempotent send verified (re-running graph cannot double-send)
-- Kill-server-resume demo recorded
-- Approve-with-edits demo recorded (both drafts in audit log)
-- SLA timeout demo recorded (auto-escalate to Manual Queue)
-- 5 evaluators run on 50-ticket dataset
+- Kill-server-resume demo recorded (server killed mid-pause → Slack message buttons still resume on restart via `slack_message_ts`)
+- Approve-with-edits demo recorded (Slack modal edit; both drafts in audit log)
+- SLA timeout demo recorded (auto-escalate to Manual Queue + Slack notice)
+- 5 evaluators run on 50-ticket Bitext dataset
 - v1 → v2 → v3 metrics table populated with REAL numbers
-- README complete with all sections
+- README complete with all sections including the explicit "real vs mocked" table
 - Public LangSmith trace links with full tag set in README
-- 2-min demo video uploaded
+- 2-min demo video uploaded showing real email → Slack approval → real email reply
 - GitHub repo public
 - 5+ specific failure modes documented honestly
 
