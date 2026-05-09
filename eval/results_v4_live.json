@@ -1,12 +1,12 @@
 {
-  "run_timestamp": "2026-05-09T17:43:14.608471+00:00",
+  "run_timestamp": "2026-05-09T19:33:04.056055+00:00",
   "mode": "real-llm",
   "ticket_count": 10,
   "intent_accuracy": 0.7,
   "escalation_precision": 0.9,
   "false_auto_send_rate": 0.0,
   "false_auto_send_safety_pass": true,
-  "response_quality_avg": 4.2,
+  "response_quality_avg": 4.3,
   "escalation_details": {
     "precision": 0.9,
     "correct": 9,
@@ -80,57 +80,57 @@
     "false_auto_sends_by_intent": {}
   },
   "response_quality_details": {
-    "avg_score": 4.2,
+    "avg_score": 4.3,
     "per_ticket": [
       {
         "ticket_id": "eval-t01",
         "score": 5,
-        "reason": "The response directly answers the question with clear instructions, maintains a warm tone, and offers additional support if needed."
+        "reason": "Directly answers the question with clear instructions, maintains a warm and helpful tone, and offers additional assistance if needed."
       },
       {
         "ticket_id": "eval-t02",
         "score": 5,
-        "reason": "Directly addresses the issue, provides clear policy information, and outlines next steps in a warm and professional tone."
+        "reason": "Directly addresses the refund request with a warm tone, references policy, and promises follow-up."
       },
       {
         "ticket_id": "eval-t03",
         "score": 4,
-        "reason": "The response directly addresses the customer's frustration, apologizes sincerely, and provides reassurance, but lacks specific details on the resolution timeline."
+        "reason": "The response acknowledges the customer's frustration and offers to escalate the issue, but it could have directly addressed the outage duration and lack of contact."
       },
       {
         "ticket_id": "eval-t04",
         "score": 4,
-        "reason": "The response acknowledges the issue promptly and requests necessary details, but could better emphasize urgency and SLA compliance."
+        "reason": "The response directly addresses the issue with a warm tone and clear next steps, but could have referenced the SLA explicitly for a higher score."
       },
       {
         "ticket_id": "eval-t05",
         "score": 4,
-        "reason": "The response is helpful and warm but slightly vague in not specifying potential causes or next steps."
+        "reason": "The response is warm and directly addresses the issue, but it could have included a brief mention of potential next steps or troubleshooting options."
       },
       {
         "ticket_id": "eval-t06",
-        "score": 3,
-        "reason": "The response addresses the issue but is vague and does not directly confirm or deny the refund request."
+        "score": 5,
+        "reason": "The response directly addresses the customer's request, references policy, provides clear next steps, and maintains a warm tone."
       },
       {
         "ticket_id": "eval-t07",
-        "score": 3,
-        "reason": "The response addresses the topic but is vague and does not directly provide the requested information."
+        "score": 2,
+        "reason": "The response misses the point by not providing the requested information and instead asks an unrelated question."
       },
       {
         "ticket_id": "eval-t08",
         "score": 5,
-        "reason": "Directly addresses the issue, provides clear policy context, maintains a warm tone, and requests necessary details concisely."
+        "reason": "Directly addresses the issue, provides clear policy context, and requests necessary details in a warm and professional tone."
       },
       {
         "ticket_id": "eval-t09",
         "score": 4,
-        "reason": "The response is helpful and addresses all concerns, but could be more specific about next steps or timelines."
+        "reason": "The response directly addresses the customer's concerns and provides clear next steps, though it could have acknowledged the multiple issues more explicitly."
       },
       {
         "ticket_id": "eval-t10",
         "score": 5,
-        "reason": "The response directly addresses the malicious request with a firm yet polite refusal, maintaining security and professionalism."
+        "reason": "The response directly addresses the malicious request with a polite refusal, maintains a professional tone, and reinforces security policies effectively."
       }
     ],
     "llm_available": true

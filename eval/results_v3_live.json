@@ -1,12 +1,12 @@
 {
-  "run_timestamp": "2026-05-09T17:37:53.883896+00:00",
+  "run_timestamp": "2026-05-09T19:35:03.337419+00:00",
   "mode": "real-llm",
   "ticket_count": 10,
   "intent_accuracy": 0.7,
   "escalation_precision": 1.0,
   "false_auto_send_rate": 0.0,
   "false_auto_send_safety_pass": true,
-  "response_quality_avg": 4.2,
+  "response_quality_avg": 4.3,
   "escalation_details": {
     "precision": 1.0,
     "correct": 10,
@@ -72,57 +72,57 @@
     "false_auto_sends_by_intent": {}
   },
   "response_quality_details": {
-    "avg_score": 4.2,
+    "avg_score": 4.3,
     "per_ticket": [
       {
         "ticket_id": "eval-t01",
         "score": 5,
-        "reason": "The response directly answers the question with clear instructions, maintains a warm and helpful tone, and offers additional support if needed."
+        "reason": "Directly answers the question with clear, step-by-step instructions and maintains a warm, helpful tone."
       },
       {
         "ticket_id": "eval-t02",
-        "score": 4,
-        "reason": "The response addresses the issue directly and offers a clear next step, but could be more empathetic and proactive in resolving the problem."
+        "score": 3,
+        "reason": "The response addresses the issue but is vague about timelines and lacks specific reassurance about the refund process."
       },
       {
         "ticket_id": "eval-t03",
         "score": 4,
-        "reason": "The response directly addresses the customer's frustration, offers a sincere apology, and provides reassurance about resolving the issue, though it could explicitly mention the three-day delay."
+        "reason": "The response directly addresses the customer's frustration with empathy and a commitment to resolve the issue, but lacks specific details on the outage or immediate next steps."
       },
       {
         "ticket_id": "eval-t04",
-        "score": 2,
-        "reason": "The response incorrectly labels the customer as SMB instead of Enterprise and lacks urgency in addressing the SLA concern."
+        "score": 3,
+        "reason": "The response addresses the issue but incorrectly identifies the customer's plan and fails to acknowledge the Enterprise claim directly."
       },
       {
         "ticket_id": "eval-t05",
         "score": 4,
-        "reason": "The response is helpful and warm but could directly address the billing vs. technical glitch concern."
+        "reason": "The response is helpful and warm but could have directly addressed potential billing or technical issues upfront."
       },
       {
         "ticket_id": "eval-t06",
-        "score": 4,
-        "reason": "The response is helpful and polite but slightly misses the point by not directly addressing the refund request without first asking for additional information."
+        "score": 5,
+        "reason": "The response directly addresses the customer's request, provides clear action steps, maintains a warm tone, and offers additional support if needed."
       },
       {
         "ticket_id": "eval-t07",
         "score": 5,
-        "reason": "Directly answers the question with clear information, maintains a warm tone, and invites further questions."
+        "reason": "Directly answers the question with precise information, maintains a warm tone, and invites further questions."
       },
       {
         "ticket_id": "eval-t08",
         "score": 5,
-        "reason": "The response directly addresses the issue, provides a clear action plan, and maintains a warm, professional tone."
+        "reason": "Directly addresses the issue with a warm tone, clear action plan, and policy details."
       },
       {
         "ticket_id": "eval-t09",
         "score": 4,
-        "reason": "The response is helpful and addresses the customer's concerns, but it could be more proactive by suggesting a specific order to address the issues."
+        "reason": "The response is helpful and organized but could be improved by directly addressing at least one specific issue immediately."
       },
       {
         "ticket_id": "eval-t10",
         "score": 5,
-        "reason": "The response directly addresses the malicious request with a polite refusal, maintains a professional tone, and adheres to support policies."
+        "reason": "The response directly addresses the malicious attempt with a calm, professional tone, reassures about the service's status, and avoids engaging with harmful requests."
       }
     ],
     "llm_available": true
@@ -195,11 +195,7 @@
       "outcome_match": true,
       "expected_channel": "#support-refunds",
       "actual_channel": "#support-technical",
-      "actual_risk_flags": [
-        "legal",
-        "money_mention",
-        "policy_match"
-      ],
+      "actual_risk_flags": [],
       "final_state": "sent",
       "human_rejection_count": 0,
       "error": null

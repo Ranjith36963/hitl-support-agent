@@ -2,7 +2,7 @@
 
 > Production-grade Human-in-the-Loop customer support agent with durable execution, multi-channel Slack approval routing, three capability-isolated MCP servers, and real Gmail I/O. Built on LangGraph + LangSmith.
 
-**Status:** v3 architecture shipped end-to-end (87 / 87 v3 tests passing). **v4 multi-agent layer (Researcher + Drafter ↔ Critic) shipped behind `MULTIAGENT_ENABLED` flag** — 27 additional v4 tests passing including 5 Critic-invariant tests that prove the safety contract in code. **Total: 114 / 114 tests passing.** **Live LLM eval complete** — both v3 and v4 hold `false_auto_send_rate = 0%` against 10 hand-curated tickets via DeepSeek V3 on OpenRouter. v4 Critic flipped 1 ticket from auto_send → escalated (Gate 2 threshold tightening) — full numbers in the [v4 section](#v4--multi-agent-iteration). Demo recordings remain user-action items.
+**Status:** v3 architecture shipped end-to-end (87 / 87 v3 tests passing). **v4 multi-agent layer (Researcher + Drafter ↔ Critic) shipped behind `MULTIAGENT_ENABLED` flag** — 31 additional v4 tests passing including 6 Critic-invariant tests (one of which proves escalate-on-uncertainty for malformed LLM JSON) and 3 v4 integration smokes. **Total: 118 / 118 tests passing in both `MULTIAGENT_ENABLED=0` and `=1` modes.** **Live LLM eval complete** — both v3 and v4 hold `false_auto_send_rate = 0%` against 10 hand-curated tickets via DeepSeek V3 on OpenRouter. v4 Critic flipped 1 ticket from auto_send → escalated (Gate 2 threshold tightening) — full numbers in the [v4 section](#v4--multi-agent-iteration). Demo recordings remain user-action items.
 
 ---
 
@@ -136,7 +136,7 @@ MULTIAGENT_ENABLED=0 python -m src.server  # v3 single-agent (comparison artifac
 | Intent accuracy | 70.0% | 70.0% | 0.0 pp |
 | Escalation precision | 100.0% | 90.0% | -10 pp *(see t07 below)* |
 | **`false_auto_send_rate`** | **0.0%** | **0.0%** | **unchanged (safety invariant)** ✅ |
-| Response quality (LLM-judge) | 4.20 / 5 | 4.20 / 5 | 0.00 |
+| Response quality (LLM-judge) | 4.30 / 5 | 4.30 / 5 | 0.00 |
 | Cost per ticket | *deferred to v4.1* | *deferred to v4.1* | — |
 
 > **Cost row honestly deferred.** Per-call token + price instrumentation requires reading `resp.usage.prompt_tokens` / `completion_tokens` from every OpenAI response and accumulating with a per-model price table. That instrumentation is a v4.1 task (issue: v4.1-cost-tracking). The shortcut — hardcoding a model→price table or estimating from token counts alone — would produce numbers that drift the moment OpenRouter changes pricing. **No fake cost numbers in the README.**
@@ -168,11 +168,11 @@ Compares `tool_selection_precision` (does the cheaper model still pick the right
 
 - **Researcher milestone-1 is deterministic, not full ReAct.** Same trace narrative at 1/3 the cost and zero risk of agent loops. Full ReAct upgrade is v4.1 follow-up — see comment block in `src/agents/researcher.py`.
 - **Critic loop hard cap is 2 iterations.** Test-asserted in `test_drafter_critic_loop.py`. Even when the Critic returns "revise" forever, the loop exits.
-- **No `langchain_openai` dependency added.** v4 reuses `openai.AsyncOpenAI` directly via `src/agents/base.get_llm()` — same client v3 uses, one OpenRouter integration to debug.
+- **No new LLM dependency.** v4 uses the same SDK as v3 (`openai.AsyncOpenAI`) but through its own factory (`src/agents/base.get_llm()`), not by importing v3's client. Same library, parallel module — one OpenRouter integration class to debug, but the v4 agents do not have a runtime dependency on `src.nodes`. Module dependency arrow is v3→shared and v4→shared, never v4→v3.
 
 See [`demo/v4_critic_intercept.md`](./demo/v4_critic_intercept.md) for the agent-to-agent self-correction demo script.
 
-## Test coverage — 106 / 106 (87 v3 + 19 v4)
+## Test coverage — 118 / 118 (87 v3 + 31 v4)
 
 | Suite | Count | What it proves |
 |---|---:|---|
@@ -222,7 +222,7 @@ cp .env.example .env
 
 ```bash
 pip install -r requirements.txt
-pytest                                # 85 / 85 should pass
+pytest                                # 118 / 118 should pass (v3+v4)
 python -m eval.run_experiments --no-llm   # routing eval (no creds needed)
 ```
 

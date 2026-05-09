@@ -227,17 +227,26 @@ async def _run_ticket(
         async with async_sqlite_checkpointer(db_path) as cp:
             graph = compile_full_with_checkpointer(cp)
 
-            # Common context managers: always patch the MCP client
-            # Conditionally patch LLM calls in --no-llm mode
+            # Common context managers: always patch the MCP client at BOTH
+            # call sites — v3 (src.nodes._client) and v4 (src.agents.researcher._client).
+            # The v4 agents do NOT depend on src.nodes (clean module dependency
+            # arrow: v3→shared, v4→shared); they call src.agents.base.get_client.
+            # Patching base.get_client directly is too late because researcher.py
+            # imports get_client at module load — the binding is already cached.
+            # We patch the researcher module's own _client wrapper instead, the
+            # same approach test_v4_integration_smoke.py uses.
+            # Conditionally patch LLM calls in --no-llm mode.
             if no_llm:
                 ctx = (
                     patch("src.nodes.classify_intent", fake_classify),
                     patch("src.nodes.draft_response", fake_draft),
                     patch("src.nodes._client", lambda: fake_router),
+                    patch("src.agents.researcher._client", lambda: fake_router),
                 )
             else:
                 ctx = (
                     patch("src.nodes._client", lambda: fake_router),
+                    patch("src.agents.researcher._client", lambda: fake_router),
                 )
 
             # Run initial stream (up to interrupt or completion)

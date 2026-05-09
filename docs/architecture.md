@@ -440,3 +440,72 @@ The eval suite runs against the **Bitext Customer Support dataset** (50-ticket s
 - **Multi-model routing** — cheap classifier model (Haiku-tier) for Gate 1 + expensive drafter (Sonnet-tier) for Step 4. Likely meaningful cost reduction on auto-send tickets; quantify after build.
 - **Admin debug view** — expose `graph.get_state()` / `graph.get_state_history()` to inspect any thread's full execution history during incident response.
 - **Real CRM / ticketing integration** — swap mock `support_read.py` for Salesforce/HubSpot API; swap email-direct entry for Zendesk Conversations API. MCP server replacement, no graph logic changes.
+
+## v4 Multi-Agent Layer
+
+v4 promotes two reasoning-heavy v3 nodes into specialized agents — **Researcher** (replaces `enrich_context_node`) and **Drafter ⇄ Critic** (replaces `draft_response_node`) — coordinated by the unchanged outer graph. The 15-node parent topology, every safety gate, the channel router, the interrupt/resume protocol, and append-only audit semantics are all identical to v3. v4 is opt-in via `MULTIAGENT_ENABLED=1`; with the flag off, v3 runs untouched. See `docs/v4_multiagent.md` for the full spec, hard invariants, and evaluator targets.
+
+### v4 sub-graph wiring
+
+```mermaid
+flowchart TD
+    subgraph Researcher["Researcher sub-graph (replaces enrich_context_node)"]
+        RS([START]):::terminal
+        RNode[research<br/>deterministic intent → MCP Read tools<br/>FAQ → KB only<br/>refund/billing/complaint → KB+CRM+history<br/>technical → KB+CRM]:::node
+        RE([END]):::terminal
+        RS --> RNode --> RE
+    end
+
+    subgraph Drafter["Drafter ⇄ Critic sub-graph (replaces draft_response_node)"]
+        DS([START]):::terminal
+        DNode[drafter<br/>writes / rewrites draft<br/>picks up critic feedback if iter > 0]:::node
+        CNode[critic<br/>LLM judge<br/>verdict + severity + feedback<br/>draft_confidence *= 1 - severity*0.5]:::node
+        Route{revise AND<br/>iter &lt; MAX_CRITIC_ITERATIONS - 1?}:::decision
+        Loop[drafter_loop<br/>iteration++<br/>MAX = 2 hard cap]:::node
+        DE([END]):::terminal
+        DS --> DNode --> CNode --> Route
+        Route -->|yes| Loop --> DNode
+        Route -->|no| DE
+    end
+
+    classDef node fill:#a5d8ff,stroke:#2563eb,stroke-width:2px,color:#000
+    classDef decision fill:#fff3bf,stroke:#f59e0b,stroke-width:2px,color:#000
+    classDef terminal fill:#c3fae8,stroke:#15803d,stroke-width:2px,color:#000
+```
+
+Both sub-graphs are compiled LangGraph `StateGraph`s over the same `AgentState` and slot into the parent at the existing v3 node positions. Output shapes match v3 exactly so downstream nodes (`route_after_draft`, `channel_router`, `interrupt_gate`, etc.) are unchanged. The Critic is a NEW agent with no v3 equivalent — it lives only inside the Drafter sub-graph and never emits routing decisions; it can only adjust `draft_confidence` downward (multiplicative by `1 - severity * 0.5`).
+
+### v4 codebase map
+
+Extends the v3 "How this maps to the codebase" table above. v4 agents share infrastructure via `src/agents/base.py`; they do not import from `src/nodes.py` (clean module dependency — v4 → shared, never v4 → v3).
+
+| Diagram region / contract | Files |
+|---|---|
+| Shared agent infra — `get_llm()` (AsyncOpenAI to OpenRouter, same SDK as v3), `get_model_id(override_env)`, `load_prompt()`, `build_handoff_metadata()`, `get_client()` (delegates to `graph_runner.get_mcp_router`) | `src/agents/base.py` |
+| Researcher sub-graph — single-node compiled sub-graph; deterministic intent → MCP Read tool selection (full ReAct deferred to v4.1) | `src/agents/researcher.py` |
+| Drafter sub-graph — `drafter ⇄ critic` loop with `MAX_CRITIC_ITERATIONS = 2` hard cap; output shape preserves v3 contract (`original_draft`, `final_draft`, `draft_confidence`) | `src/agents/drafter.py` |
+| Critic agent — LLM judge with escalate-on-uncertainty fallback (malformed JSON → `verdict=revise`, `severity=0.5`); writes only allow-listed fields; severity clamped to `[0, 1]` | `src/agents/critic.py` |
+| System prompts (markdown, version-controlled) | `data/prompts/researcher_system.md` · `data/prompts/drafter_system.md` · `data/prompts/critic_system.md` |
+| Critic safety contract — 6 tests prove allow-list, severity clamp, monotonic confidence decrease, malformed-JSON fallback | `tests/test_critic_invariants.py` |
+| Drafter↔Critic loop hard cap — 3 tests prove the loop terminates at 2 iterations even when the Critic returns `revise` indefinitely | `tests/test_drafter_critic_loop.py` |
+| End-to-end smoke — 3 tests covering FAQ auto-send path, revise-then-accept loop, and Critic-triggered escalate path | `tests/test_v4_integration_smoke.py` |
+| 5 v4 evaluators — tool selection precision, critic disagreement rate, alignment with human edits, loop iteration distribution, per-agent cost breakdown | `eval/multiagent_evaluators.py` |
+| A/B Researcher-model swap experiment runner (DeepSeek vs Haiku-tier) | `eval/ab_model_swap.py` |
+
+### Hard invariants preserved
+
+The full list lives in `docs/v4_multiagent.md` — "What stays UNCHANGED" table. Cross-link, don't restate. Highlights:
+
+- `pii_redact_node` still runs first; no agent ever sees raw PII.
+- `route_after_draft` Gates 1 + 2 are still hard thresholds in `src/policy.py`. Critic adjusts `draft_confidence` as input to Gate 2; it does NOT replace either gate.
+- `interrupt_gate` is still alone in its own node, no `try/except`, Slack post strictly before.
+- `send_email_node` app-layer idempotency on `sent_message_id` unchanged.
+- `audit_log` remains append-only; both `original_draft` and `final_draft` saved on edit; every agent appends a handoff-metadata entry per the schema in `docs/v4_multiagent.md`.
+- MCP capability isolation unchanged — agents reach MCP only through `get_client()` → Read / Email Write / Slack Write boundary still holds.
+
+### What's deferred to v4.1
+
+- **Cost tracking** — per-agent token/cost rollup into `cost_breakdown`. The hooks exist (handoff metadata captures `agent_name`); aggregation across agent runs is not wired.
+- **LangSmith UI metadata propagation** — handoff metadata is appended to each agent's `audit_log` entry today (inspectable via `jq '.per_ticket[].audit_log[].metadata'`), but is not auto-propagated into LangSmith run-tree metadata for one-click `agent_name` filtering. Per-agent slicing in the UI still requires inspecting individual run input/output JSON.
+- **Multi-agent evaluator aggregation** — the 5 evaluators in `eval/multiagent_evaluators.py` run per-ticket; cross-run dashboards and the v3-vs-v4 comparison table are still manual.
+- **Removal of the v3 path** — `MULTIAGENT_ENABLED=0` keeps the v3 single-agent graph alive as a reversible fallback. Dropping the flag (and the v3 enrich/draft node bodies) waits until v4 has logged enough production traffic to justify it.

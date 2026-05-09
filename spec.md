@@ -930,4 +930,63 @@ No fabricated metrics. No invented features. Numbers in eval tables filled in on
 
 ---
 
+## 21. v4 Multi-Agent Amendment
+
+v4 ships a 3-agent reasoning layer (Researcher, Drafter, Critic) as compiled LangGraph sub-graphs that replace two v3 nodes. It is gated behind the `MULTIAGENT_ENABLED=1` feature flag. Outer-graph topology, deterministic gates, and every safety invariant from v3 are preserved unchanged. v3 remains the frozen baseline for comparison; flipping the flag off restores v3 exactly.
+
+### What changed from v3
+
+- `enrich_context_node` → **Researcher Agent** (ReAct sub-graph over MCP Read tools)
+- `draft_response_node` → **Drafter Agent** (ReAct sub-graph with `policy_quote_lookup`)
+- **Critic Agent** (NEW) — runs inside Drafter sub-graph; emits `verdict ∈ {accept, revise}` + `severity` that adjusts `draft_confidence` only
+
+### Hard invariants preserved
+
+- PII redact runs first, deterministically (LLM never sees real PII)
+- `false_auto_send_rate = 0%` (Critic does not bypass Gates 1+2; thresholds stay hard-coded in `src/policy.py`)
+- `interrupt_gate` isolation (alone in node, no `try/except`, no side effects)
+- App-layer idempotent send (`sent_message_id` checked before SMTP)
+- Append-only audit log (`original_draft` AND `final_draft` saved on edit)
+- MCP capability isolation (Read / Email Write / Slack Write — agents do not cross boundaries)
+
+### v3 vs v4 metrics (live LLM, 10 hand-curated tickets, DeepSeek V3 via OpenRouter)
+
+| Metric | v3 | v4 |
+|---|---|---|
+| Intent accuracy | 70.0% | 70.0% |
+| Escalation precision | 100.0% | 90.0% |
+| False auto-send rate | 0.0% | 0.0% |
+| Response quality | 4.30 / 5 | 4.30 / 5 |
+| Cost per ticket | deferred to v4.1 | deferred to v4.1 |
+
+### Honest finding (eval-t07)
+
+Ticket `eval-t07` is a `basic_technical` / `info` intent that v3 auto-sent at high confidence. In v4, the Critic flagged a minor grounding concern and emitted a non-zero `severity`, which lowered `draft_confidence` below Gate 2's 0.85 threshold and routed the ticket to human approval. v4 trades one auto-send-eligible ticket for an additional Critic pass over every draft — a small, documented drop in escalation precision (100% → 90%) in exchange for an extra layer of pre-send review. The safety invariant (`false_auto_send_rate = 0%`) held in both versions.
+
+### Cross-links
+
+- `docs/v4_multiagent.md` — full v4 architecture amendment, agent specs, handoff metadata schema, sign-off list
+- `docs/superpowers/plans/2026-05-09-v4-multiagent.md` — TDD implementation plan
+- `docs/v3_completion_status.md` — v3 baseline frozen
+- `eval/results_v3_live.json`, `eval/results_v4_live.json` — raw eval artifacts (per-ticket audit logs)
+
+### Deferred to v4.1
+
+- Cost-per-ticket instrumentation (token counts × per-model OpenRouter price)
+- LangSmith `@traceable` metadata UI propagation — handoff metadata is in `audit_log` today; UI-level filtering by `agent_name` is the gap
+- Multi-agent evaluator aggregation in `eval/run_experiments.py` (5 new evaluators exist; cross-version aggregation not wired)
+- Removal of v3 path — currently behind `MULTIAGENT_ENABLED` flag; deprecation comment to be added in `src/graph.py` once v4 is the default
+
+### Sign-off addendum (v4-specific)
+
+In addition to §19 sign-off criteria, v4 is "done" when:
+
+- All 3 agents (Researcher, Drafter, Critic) implemented as compiled LangGraph sub-graphs in `src/agents/`
+- Critic invariants test-asserted — 5 tests in `tests/test_critic_invariants.py` prove Critic cannot escalate, cannot bypass Gates 1+2, can only adjust `draft_confidence`
+- Drafter↔Critic loop hard cap of 2 iterations is test-asserted (test forces an infinite "revise" verdict and confirms exit)
+- Live LLM eval run shows `false_auto_send_rate = 0%` in v4 on the 10-ticket curated set
+- v3 baseline preserved as comparison artifact (`eval/results_v3_live.json`) — flag flip restores v3 exactly
+
+---
+
 End of spec.

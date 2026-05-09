@@ -172,8 +172,17 @@ def build_full_graph_builder() -> StateGraph:
     # comparison artifact for the v3-vs-v4 portfolio iteration story
     # (eval/results_v3_live.json vs eval/results_v4_live.json). It is NOT a
     # production-rollback safety net for a 24h-build portfolio with no live
-    # traffic. Do not extend the v3 path. Do not refactor it. Schedule for
-    # removal in v4.1 once the comparison data has served its portfolio purpose.
+    # traffic. Do not extend the v3 path. Do not refactor it.
+    #
+    # CONCRETE REMOVAL TRIGGER (any one is sufficient):
+    #   1. Demo 4 (Critic intercept) recorded and uploaded — comparison data
+    #      now lives in the demo video, not in runtime code.
+    #   2. First portfolio interview cycle complete — recruiters who care about
+    #      the v3-vs-v4 narrative have already seen it.
+    #   3. v4.1 plan starts execution — that plan owns the removal task.
+    # When any trigger fires: delete the if/else above, remove src.nodes
+    # enrich_context_node + draft_response_node from src/nodes.py, retire
+    # tests/test_integration_smoke.py, default MULTIAGENT_ENABLED → 1.
     import os as _os
     _MULTIAGENT = _os.environ.get("MULTIAGENT_ENABLED", "0") == "1"
 

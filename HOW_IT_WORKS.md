@@ -267,3 +267,38 @@ Every trace tagged in LangSmith with `graph_version`, `intent`, `outcome`, `huma
 ## The whole thing in one sentence
 
 Jamie sends email → IMAP catches it → agent classifies + drafts → either auto-sends (FAQ-tier) or **posts to the right Slack channel by priority routing → pauses (durable) → human clicks Approve/Edit/Reject → resumes** → SMTP sends the threaded reply → Jamie's phone buzzes. Customer never sees the agent or Slack.
+
+---
+
+## How v4 changes this story
+
+> v3's Jamie-refund walkthrough above is the v3-mode narrative. v4 adds three specialized agents while preserving every step from 7 onward. This section retells what happens between Step 5 (Enrich Context) and Step 7 (Policy Risk Check) when `MULTIAGENT_ENABLED=1`.
+
+### What stays exactly the same
+
+- Steps 1-4: ingestion, PII redact, classify intent — identical
+- Steps 7-17: gates, channel router, Slack post, interrupt, resume, finalize, send, audit — identical
+- Hard invariants — PII determinism, `false_auto_send_rate=0%`, interrupt_gate isolation, idempotent send, append-only audit, MCP capability isolation
+
+### Step 5 becomes the Researcher Agent
+
+Jamie's refund ticket arrives at what used to be `enrich_context_node`. In v4 it's a compiled sub-graph — the **Researcher Agent** — running a ReAct loop over the MCP Read tools. Refund intent triggers the full sweep: the Researcher calls `get_kb_article`, `get_crm_profile`, and `get_customer_history`, in that order, then exits with the same enrichment shape v3 produced. For Jamie specifically, this is functionally identical to the v3 deterministic node — the difference shows up on a simple FAQ ("how do I reset my password?") where the Researcher calls only KB and skips the CRM lookups entirely. The audit log gains a `researcher_agent` entry with `tools_called=["get_kb_article","get_crm_profile","get_customer_history"]` — same outcome as v3 enrichment, with agentic tool selection visible in the trace.
+
+### Step 6 becomes the Drafter ↔ Critic loop
+
+What used to be a single LLM call is now a tight two-agent sub-graph. The **Drafter Agent** writes draft v1 with a `draft_confidence` score, exactly the v3 shape. Then the **Critic Agent** takes over: it reads the draft alongside the policy quotes the Researcher pulled, and emits a verdict — `accept` or `revise` — with a severity score and feedback string. If the verdict is `accept`, the loop exits and draft v1 flows into Gate 1 unchanged. If the verdict is `revise` and we're still on iteration 0, the Drafter rewrites with the Critic's feedback in the prompt, the Critic audits draft v2, and the loop exits regardless — **a hard cap of 2 iterations, no infinite loops**. The Critic's severity score is wired into draft confidence as `draft_confidence *= (1 - severity * 0.5)` — meaning the Critic can only *lower* confidence, never raise it. And on a malformed JSON response from the Critic, the system fails safe: verdict defaults to `revise` with severity 0.5, escalating to a human rather than silently passing through.
+
+### What this looked like under live eval
+
+We ran 10 tickets through both v3 and v4 with real LLM calls. **`false_auto_send_rate` stayed at 0% under both modes** — the deterministic safety contract held. One ticket (`eval-t07`, a high-confidence info question) flipped from auto-send under v3 to escalated under v4 — the Critic lowered `draft_confidence` below Gate 2's 0.85 threshold. v4 trades a small drop in escalation precision for an additional Critic pass over every draft, without weakening the deterministic safety contract.
+
+### What v4 didn't change
+
+Jamie's experience is identical to the v3 walkthrough. Her phone still buzzes with a real email reply, threaded under her original "Refund please" message, looking like it came from a competent human at a real support team. The internal pre-Slack drafting is now a 3-agent pipeline (Researcher → Drafter ↔ Critic) instead of two deterministic nodes — but the Slack post, the human approval, the threading headers, the idempotent send, and the audit log are bit-for-bit the same.
+
+### Cross-links
+
+- Architecture lock + invariants: `docs/v4_multiagent.md`
+- Implementation plan: `docs/superpowers/plans/2026-05-09-v4-multiagent.md`
+- Raw eval artifacts: `eval/results_v4_live.json` vs `eval/results_v3_live.json`
+- Code: `src/agents/{researcher,drafter,critic}.py`

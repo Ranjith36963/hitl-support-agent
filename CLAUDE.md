@@ -2,13 +2,25 @@
 
 > Always-loaded. Kept tight. Three docs are source of truth — point at them, don't duplicate.
 
-## Three source docs
+## Project state — v4 multi-agent shipped behind feature flag
+
+- **v3** (single-agent, 87 tests) and **v4** (multi-agent: Researcher + Drafter↔Critic, +31 tests) both live in the codebase.
+- Toggle: `MULTIAGENT_ENABLED=1` enables v4. Default 0 keeps v3 path.
+- **v3 retained as comparison artifact**, NOT production-rollback. Removal scheduled for v4.1 — see deprecation comment in `src/graph.py`.
+- Live LLM eval results: both modes hold `false_auto_send_rate = 0%` on 10-ticket Bitext sample. Real numbers in `README.md` v4 section.
+- Tests: 118/118 passing in both flag modes.
+
+## Source docs
 
 | Doc | When to open it |
 |---|---|
-| `spec.md` | Build spec — scope, timeline, sign-off, full state schema (§5), implementation rules (§6.5) |
-| `docs/architecture.md` | Diagrams, env-var table, sequence, state machine, codebase map, LangSmith tag table |
-| `HOW_IT_WORKS.md` | End-to-end product narrative (paste into README, walk through in interviews) |
+| `spec.md` | Build spec — scope, sign-off, full state schema (§5), implementation rules (§6.5), v4 amendment (§21) |
+| `docs/architecture.md` | Diagrams, env-var table, sequence, state machine, codebase map, LangSmith tag table — includes v4 sub-graph section |
+| `HOW_IT_WORKS.md` | End-to-end product narrative — Jamie example (v3) + "How v4 changes this story" appended |
+| `docs/v4_multiagent.md` | v4 spec amendment — architecture lock + hard invariants |
+| `docs/superpowers/plans/2026-05-09-v4-multiagent.md` | v4 TDD implementation plan (10 tasks, full code) |
+| `docs/v3_completion_status.md` | Frozen v3 status snapshot taken the day v4 began |
+| `adviserplan.md` | v3 build plan (advisor-hardened 6-10h delegation plan) |
 
 ## Honesty rule (non-negotiable)
 
@@ -22,7 +34,7 @@
 
 ## What we're building
 
-Agent-first, human-on-demand customer support agent. **Real Gmail** in/out (IMAP IDLE / SMTP), **real Slack** with 6 channels routed by priority, durable LangGraph workflow, **three capability-isolated MCP servers**. Mock CRM + fictional **ACME SaaS Co** policy corpus. 24h portfolio build, agent owns the workflow, humans get pulled in only when needed.
+Agent-first, human-on-demand customer support agent. **Real Gmail** in/out (IMAP IDLE / SMTP), **real Slack** with 3 channels routed by priority (cut from spec's 6 — config-driven), durable LangGraph workflow, **three capability-isolated MCP servers**. Mock CRM + fictional **ACME SaaS Co** policy corpus. **v3 single-agent + v4 multi-agent (Researcher + Drafter↔Critic)** behind `MULTIAGENT_ENABLED` flag. Agent owns the workflow, humans get pulled in only when needed.
 
 ## Tech stack (do not substitute without asking)
 

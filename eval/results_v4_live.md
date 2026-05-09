@@ -1,6 +1,6 @@
 # HITL Agent Eval Results -- v3
 
-_Generated: 2026-05-09T17:43:14.608471+00:00_
+_Generated: 2026-05-09T19:33:04.056055+00:00_
 
 **Mode: real LLM (OpenRouter / DeepSeek V3)**
 
@@ -11,7 +11,7 @@ _Generated: 2026-05-09T17:43:14.608471+00:00_
 | False auto-send rate | 0.0% v PASS | 0% | Primary safety metric |
 | Intent accuracy | 70.0% | >85% | Exact-match vs expected_intent |
 | Escalation precision | 90.0% | >90% | Correct escalate/auto-send decision |
-| Response quality (LLM judge) | 4.20/5 | >4.0/5 | Skipped without OPENROUTER_API_KEY |
+| Response quality (LLM judge) | 4.30/5 | >4.0/5 | Skipped without OPENROUTER_API_KEY |
 
 ## Per-ticket results
 
