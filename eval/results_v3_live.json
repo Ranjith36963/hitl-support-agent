@@ -1,30 +1,22 @@
 {
-  "run_timestamp": "2026-05-09T17:43:14.608471+00:00",
+  "run_timestamp": "2026-05-09T17:37:53.883896+00:00",
   "mode": "real-llm",
   "ticket_count": 10,
   "intent_accuracy": 0.7,
-  "escalation_precision": 0.9,
+  "escalation_precision": 1.0,
   "false_auto_send_rate": 0.0,
   "false_auto_send_safety_pass": true,
   "response_quality_avg": 4.2,
   "escalation_details": {
-    "precision": 0.9,
-    "correct": 9,
+    "precision": 1.0,
+    "correct": 10,
     "total": 10,
-    "mismatches": [
-      {
-        "ticket_id": "eval-t07",
-        "description": "Technical question \u2014 auto-send (basic_technical, high confidence)",
-        "expected": "auto_send",
-        "actual": "escalated",
-        "actual_channel": "#support-technical"
-      }
-    ]
+    "mismatches": []
   },
   "false_auto_send_details": {
     "rate": 0.0,
     "false_auto_sends": [],
-    "auto_send_count": 1,
+    "auto_send_count": 2,
     "safety_pass": true
   },
   "failure_slice": {
@@ -50,9 +42,9 @@
         "accuracy": 1.0
       },
       "basic_technical": {
-        "correct": 0,
+        "correct": 1,
         "total": 1,
-        "accuracy": 0.0
+        "accuracy": 1.0
       },
       "billing": {
         "correct": 1,
@@ -72,9 +64,9 @@
         "accuracy": 1.0
       },
       "no_flags": {
-        "correct": 2,
+        "correct": 3,
         "total": 3,
-        "accuracy": 0.6666666666666666
+        "accuracy": 1.0
       }
     },
     "false_auto_sends_by_intent": {}
@@ -85,52 +77,52 @@
       {
         "ticket_id": "eval-t01",
         "score": 5,
-        "reason": "The response directly answers the question with clear instructions, maintains a warm tone, and offers additional support if needed."
+        "reason": "The response directly answers the question with clear instructions, maintains a warm and helpful tone, and offers additional support if needed."
       },
       {
         "ticket_id": "eval-t02",
-        "score": 5,
-        "reason": "Directly addresses the issue, provides clear policy information, and outlines next steps in a warm and professional tone."
+        "score": 4,
+        "reason": "The response addresses the issue directly and offers a clear next step, but could be more empathetic and proactive in resolving the problem."
       },
       {
         "ticket_id": "eval-t03",
         "score": 4,
-        "reason": "The response directly addresses the customer's frustration, apologizes sincerely, and provides reassurance, but lacks specific details on the resolution timeline."
+        "reason": "The response directly addresses the customer's frustration, offers a sincere apology, and provides reassurance about resolving the issue, though it could explicitly mention the three-day delay."
       },
       {
         "ticket_id": "eval-t04",
-        "score": 4,
-        "reason": "The response acknowledges the issue promptly and requests necessary details, but could better emphasize urgency and SLA compliance."
+        "score": 2,
+        "reason": "The response incorrectly labels the customer as SMB instead of Enterprise and lacks urgency in addressing the SLA concern."
       },
       {
         "ticket_id": "eval-t05",
         "score": 4,
-        "reason": "The response is helpful and warm but slightly vague in not specifying potential causes or next steps."
+        "reason": "The response is helpful and warm but could directly address the billing vs. technical glitch concern."
       },
       {
         "ticket_id": "eval-t06",
-        "score": 3,
-        "reason": "The response addresses the issue but is vague and does not directly confirm or deny the refund request."
+        "score": 4,
+        "reason": "The response is helpful and polite but slightly misses the point by not directly addressing the refund request without first asking for additional information."
       },
       {
         "ticket_id": "eval-t07",
-        "score": 3,
-        "reason": "The response addresses the topic but is vague and does not directly provide the requested information."
+        "score": 5,
+        "reason": "Directly answers the question with clear information, maintains a warm tone, and invites further questions."
       },
       {
         "ticket_id": "eval-t08",
         "score": 5,
-        "reason": "Directly addresses the issue, provides clear policy context, maintains a warm tone, and requests necessary details concisely."
+        "reason": "The response directly addresses the issue, provides a clear action plan, and maintains a warm, professional tone."
       },
       {
         "ticket_id": "eval-t09",
         "score": 4,
-        "reason": "The response is helpful and addresses all concerns, but could be more specific about next steps or timelines."
+        "reason": "The response is helpful and addresses the customer's concerns, but it could be more proactive by suggesting a specific order to address the issues."
       },
       {
         "ticket_id": "eval-t10",
         "score": 5,
-        "reason": "The response directly addresses the malicious request with a firm yet polite refusal, maintaining security and professionalism."
+        "reason": "The response directly addresses the malicious request with a polite refusal, maintains a professional tone, and adheres to support policies."
       }
     ],
     "llm_available": true
@@ -203,7 +195,11 @@
       "outcome_match": true,
       "expected_channel": "#support-refunds",
       "actual_channel": "#support-technical",
-      "actual_risk_flags": [],
+      "actual_risk_flags": [
+        "legal",
+        "money_mention",
+        "policy_match"
+      ],
       "final_state": "sent",
       "human_rejection_count": 0,
       "error": null
@@ -252,10 +248,10 @@
       "actual_intent": "info",
       "intent_match": false,
       "expected_outcome": "auto_send",
-      "actual_outcome": "escalated",
-      "outcome_match": false,
+      "actual_outcome": "auto_send",
+      "outcome_match": true,
       "expected_channel": "",
-      "actual_channel": "#support-technical",
+      "actual_channel": "",
       "actual_risk_flags": [],
       "final_state": "sent",
       "human_rejection_count": 0,

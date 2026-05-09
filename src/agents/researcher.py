@@ -30,9 +30,15 @@ from src.state import AgentState
 
 
 def _client() -> Any:
-    """Get the live MCPClientRouter. Override in tests via monkeypatch."""
-    from src.graph_runner import get_mcp_router
-    return get_mcp_router()
+    """Get the live MCPClientRouter.
+
+    Delegates to src.nodes._client at call time so the eval harness's single
+    patch point (`src.nodes._client`) reaches v4 too. Tests still monkeypatch
+    `src.agents.researcher._client` directly — that replaces this function
+    entirely and bypasses the delegation, which is the intended behavior.
+    """
+    from src.nodes import _client as nodes_client
+    return nodes_client()
 
 
 def _customer_email_from_audit(state: AgentState) -> str:

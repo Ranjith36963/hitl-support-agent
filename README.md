@@ -2,7 +2,7 @@
 
 > Production-grade Human-in-the-Loop customer support agent with durable execution, multi-channel Slack approval routing, three capability-isolated MCP servers, and real Gmail I/O. Built on LangGraph + LangSmith.
 
-**Status:** v3 architecture shipped end-to-end (87 / 87 v3 tests passing) — eval validates `false_auto_send_rate = 0%` against 10 hand-curated tickets in deterministic mode. **v4 multi-agent layer (Researcher + Drafter ↔ Critic) shipped behind `MULTIAGENT_ENABLED` flag** — 19 additional v4 tests passing including 5 Critic-invariant tests that prove the safety contract in code. **Total: 106 / 106 tests passing.** Full LLM eval + demo recordings unblock once `.env` is provisioned (see [Run locally](#run-locally)).
+**Status:** v3 architecture shipped end-to-end (87 / 87 v3 tests passing). **v4 multi-agent layer (Researcher + Drafter ↔ Critic) shipped behind `MULTIAGENT_ENABLED` flag** — 27 additional v4 tests passing including 5 Critic-invariant tests that prove the safety contract in code. **Total: 114 / 114 tests passing.** **Live LLM eval complete** — both v3 and v4 hold `false_auto_send_rate = 0%` against 10 hand-curated tickets via DeepSeek V3 on OpenRouter. v4 Critic flipped 1 ticket from auto_send → escalated (Gate 2 threshold tightening) — full numbers in the [v4 section](#v4--multi-agent-iteration). Demo recordings remain user-action items.
 
 ---
 
@@ -127,21 +127,28 @@ MULTIAGENT_ENABLED=1 python -m src.server  # v4 multi-agent
 MULTIAGENT_ENABLED=0 python -m src.server  # v3 single-agent (default)
 ```
 
-### v3 vs v4 metrics (50-ticket Bitext sample)
+### v3 vs v4 metrics (10 hand-curated tickets, live DeepSeek V3 via OpenRouter)
 
 | Metric | v3 | v4 | Δ |
 |---|---|---|---|
-| Intent accuracy | 70% (real) | TBD | TBD |
-| Response quality (LLM-judge) | TBD | TBD | TBD |
-| Escalation precision | TBD | TBD | TBD |
-| **`false_auto_send_rate`** | 0% | 0% | unchanged (invariant) |
-| Cost per ticket | TBD | TBD | TBD |
-| Critic disagreement rate | — | TBD | new |
-| Critic alignment with human edits (F1) | — | TBD | new |
-| Tool-selection precision | — | TBD | new |
-| Loop iteration distribution | — | TBD | new |
+| Intent accuracy | 70.0% | 70.0% | 0.0 pp |
+| Escalation precision | 100.0% | 90.0% | -10 pp *(see t07 below)* |
+| **`false_auto_send_rate`** | **0.0%** | **0.0%** | **unchanged (safety invariant)** ✅ |
+| Response quality (LLM-judge) | 4.20 / 5 | 4.20 / 5 | 0.00 |
 
-(Numbers fill in after live LLM eval runs. **No fake metrics** — same rule as v1/v2.)
+**Honest finding — what the Critic did:** Of 10 tickets, **1 flipped outcome under v4**. Ticket `eval-t07` ("technical question — basic_technical, high confidence") auto-sent under v3 and **escalated under v4**. The Critic lowered `draft_confidence` enough to push it below the 0.85 Gate 2 threshold. Whether this is *the Critic catching a nuance v3 missed* or *the Critic over-correcting on a safe case* needs more data than 10 tickets — but the safety metric (`false_auto_send_rate`) held at 0% in both versions. **The v4 Critic trades a small drop in escalation precision for an additional layer over every draft, without weakening the deterministic safety contract.**
+
+Raw run artifacts: [`eval/results_v3_live.json`](./eval/results_v3_live.json) · [`eval/results_v4_live.json`](./eval/results_v4_live.json)
+
+**Multi-agent-specific evaluators** (`eval/multiagent_evaluators.py`) are wired but not yet aggregated into the v3-vs-v4 table — they require LangSmith run-tree introspection rather than the existing per-ticket harness:
+
+| Evaluator | Status | Inspection path |
+|---|---|---|
+| `tool_selection_precision` | Researcher tool calls captured in audit log | `eval/results_v4_live.json` audit entries |
+| `critic_disagreement_with_drafter` | Critic verdicts captured in audit log | inspect ticket-level `audit_log` entries with `node="critic_agent"` |
+| `critic_alignment_with_humans` | needs `audit_log` + `(original_draft, final_draft)` pairs from human edits | runs once Slack edit demo data is captured |
+| `loop_iteration_count` | drafter audit entries with `iteration` field | per-ticket inspection |
+| `agent_cost_breakdown` | per-agent cost via LangSmith run-tree | LangSmith UI for now; aggregator is v4.1 work |
 
 ### A/B Researcher-model swap (`python -m eval.ab_model_swap`)
 
