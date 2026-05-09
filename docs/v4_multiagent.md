@@ -71,18 +71,24 @@ Email → pii_redact → classify_intent → [Researcher Agent] → [Drafter Age
 
 ## LangSmith observability — handoff metadata schema
 
-Every agent run tagged with:
+Every agent run captures a handoff-metadata dict via `src.agents.base.build_handoff_metadata()` with these fields:
 
-| Tag | Values |
+| Field | Values |
 |---|---|
 | `agent_name` | `researcher` / `drafter` / `critic` |
 | `handoff_from` | parent node name (e.g., `classify_intent`) |
 | `handoff_to` | next agent or node |
-| `handoff_reason` | `delegation` / `revision_requested` / `accepted` / `escalation` |
-| `loop_iteration` | 0 / 1 / 2 (Drafter↔Critic only) |
-| `tools_called` | comma-joined Researcher tool list (e.g., `kb_only` / `profile,history,kb`) |
+| `handoff_reason` | `delegation` / `revision_requested` / `accepted` / `context_ready` / `initial_draft` / `revision_attempt` |
+| `loop_iteration` | 0 / 1 (Drafter↔Critic only) |
+| `tools_called` | comma-joined Researcher tool list (e.g., `get_kb_article` / `get_kb_article,get_crm_profile,get_customer_history`) |
 
-Adds to the existing v3 tag table — does not replace it.
+### What shipped vs deferred (honest)
+
+✅ **Shipped:** the dict above is appended to every agent's `audit_log` entry. `eval/results_v4_live.json` per-ticket audit logs contain it. Inspectable via `jq '.per_ticket[].audit_log[].metadata'`.
+
+⚠️ **Deferred to v4.1:** auto-propagation into LangSmith run-tree metadata for UI-level filtering (so dashboards can group by `agent_name`). This requires `@traceable(metadata={...})` parameter wiring on the agent decorators, which we did not deliver. Today, per-agent slicing in LangSmith UI requires inspecting each run's input/output JSON — *not* a one-click filter.
+
+This is **not** a v4 blocker — the data exists, just not in the most ergonomic location. The only honest path is to ship what we built and call out what we didn't.
 
 ## New evaluators (additions to the v3 set of 5)
 

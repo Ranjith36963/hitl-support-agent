@@ -106,6 +106,31 @@ async def test_critic_appends_audit_log_does_not_mutate():
 
 
 @pytest.mark.asyncio
+async def test_critic_escalates_on_malformed_llm_json(monkeypatch):
+    """If the LLM returns garbage instead of JSON, Critic must escalate-on-uncertainty
+    (verdict=revise, severity=0.5) so Gate 2 routes to human — NEVER auto-pass."""
+    import json
+    from unittest.mock import AsyncMock, MagicMock
+    from src.agents import critic as critic_mod
+
+    # Build a fake OpenAI client that returns non-JSON content
+    fake_resp = MagicMock()
+    fake_resp.choices = [MagicMock()]
+    fake_resp.choices[0].message.content = "I cannot comply with this format."
+    fake_client = MagicMock()
+    fake_client.chat.completions.create = AsyncMock(return_value=fake_resp)
+
+    monkeypatch.setattr(critic_mod, "get_llm", lambda: fake_client)
+    monkeypatch.setattr(critic_mod, "get_model_id", lambda *_: "test-model")
+
+    # Call _llm_judge directly — it must NOT raise; must return safe-default
+    verdict = await critic_mod._llm_judge({"draft": "x"})
+    assert verdict["verdict"] == "revise", "Critic must escalate on malformed JSON"
+    assert verdict["severity"] == 0.5
+    assert "malformed" in verdict["feedback"].lower()
+
+
+@pytest.mark.asyncio
 async def test_critic_clamps_severity_to_valid_range():
     """Bad LLM output (severity > 1.0 or < 0.0) must be clamped, not crash."""
     state = {

@@ -252,3 +252,124 @@ async def test_v4_critic_revision_loop_fires_when_drafter_low_confidence(tmp_pat
     # Reset env for downstream tests
     monkeypatch.setenv("MULTIAGENT_ENABLED", "0")
     importlib.reload(src.graph)
+
+
+@pytest.mark.asyncio
+async def test_v4_refund_escalates_through_slack_then_resumes(tmp_path, monkeypatch):
+    """The v4 escalate path: refund triggers Gate 1, Slack post fires BEFORE
+    interrupt (Implementation Rule 1), graph pauses, human approves, send fires.
+
+    This is the ESCALATE counterpart to test_v4_faq_auto_sends_through_drafter_critic_loop.
+    Together they prove both auto-send and escalate paths work end-to-end with the
+    Drafter sub-graph slotted into the parent graph at the draft_response position.
+
+    Critical assertions:
+    - All 3 v4 agents (researcher, drafter, critic) fired before interrupt
+    - Slack post happened EXACTLY once before interrupt (Rule 1: pre-interrupt
+      side effects must not duplicate on resume)
+    - After resume, send_email is called exactly once and final_state == "sent"
+    """
+    from langgraph.types import Command
+
+    monkeypatch.setenv("MULTIAGENT_ENABLED", "1")
+    import src.graph
+    importlib.reload(src.graph)
+    from src.graph import async_sqlite_checkpointer, compile_full_with_checkpointer
+
+    fake_router = _fake_router()
+    # Refund tickets MUST match a policy — Gate 1 reads policy_matches and
+    # escalates on any non-empty list. Default _fake_router KB stub already
+    # returns ACME 2.1; that's enough to trip Gate 1.
+
+    fake_classify = AsyncMock(
+        return_value=ClassificationResult(
+            intent="refund",
+            intent_confidence=0.92,
+            sentiment="neutral",
+            risk_flags=["refund"],
+            risk_level="financial",
+        )
+    )
+
+    drafter_calls = 0
+    critic_calls = 0
+
+    async def fake_drafter_llm(payload):
+        nonlocal drafter_calls
+        drafter_calls += 1
+        return {
+            "draft": "Hi Alice, I've initiated your $200 refund per ACME 4.2.1.",
+            "draft_confidence": 0.91,
+        }
+
+    async def fake_critic_llm(payload):
+        nonlocal critic_calls
+        critic_calls += 1
+        return {"verdict": "accept", "severity": 0.0, "feedback": ""}
+
+    db_path = str(tmp_path / "v4_escalate.sqlite")
+    config = {"configurable": {"thread_id": "TKT-V4-ESC"}}
+
+    with (
+        patch("src.nodes.classify_intent", fake_classify),
+        patch("src.nodes._client", lambda: fake_router),
+        patch("src.agents.drafter._llm_draft", fake_drafter_llm),
+        patch("src.agents.critic._llm_judge", fake_critic_llm),
+    ):
+        async with async_sqlite_checkpointer(db_path) as cp:
+            graph = compile_full_with_checkpointer(cp)
+            state = initial_state(
+                ticket_id="TKT-V4-ESC",
+                customer_message=(
+                    "From: alice@example.com\nSubject: Refund please\n\n"
+                    "I want a $200 refund."
+                ),
+                email_thread_id="<orig-v4-esc@example.com>",
+                send_idempotency_key="idem-v4-esc",
+            )
+
+            # Phase 1: run to interrupt
+            chunks = []
+            async for c in graph.astream(state, config):
+                chunks.append(c)
+
+            assert any("__interrupt__" in c for c in chunks), (
+                f"v4 graph never paused. Chunks: {[list(c.keys()) for c in chunks]}"
+            )
+
+            snap = await graph.aget_state(config)
+            # Slack post saved BEFORE interrupt (Implementation Rule 1)
+            assert snap.values["slack_message_ts"] == "1700000000.000100"
+            assert snap.values["approval_status"] == "pending"
+            assert snap.values["intent"] == "refund"
+            # Slack posted exactly once before interrupt
+            assert fake_router.slack.post_approval_request.await_count == 1
+            # All 3 v4 agents fired pre-interrupt
+            audit_nodes = [e.get("node") for e in snap.values.get("audit_log", [])]
+            assert "researcher_agent" in audit_nodes, "Researcher did not fire under v4 escalate path"
+            assert "drafter_agent" in audit_nodes, "Drafter did not fire under v4 escalate path"
+            assert "critic_agent" in audit_nodes, "Critic did not fire under v4 escalate path"
+            # Drafter / Critic each ran exactly once (Critic accepted)
+            assert drafter_calls == 1
+            assert critic_calls == 1
+
+            # Phase 2: human approves
+            async for _ in graph.astream(
+                Command(resume={"action": "approve", "approver_id": "U_SARAH"}), config
+            ):
+                pass
+
+            final = await graph.aget_state(config)
+            assert final.values["final_state"] == "sent"
+            # Implementation Rule 1 invariant: pre-interrupt side effects DID NOT
+            # duplicate during resume. Slack post still exactly once.
+            assert fake_router.slack.post_approval_request.await_count == 1
+            # Email sent exactly once via the idempotent path
+            assert fake_router.email.send.await_count == 1
+            # Drafter/Critic also did NOT re-run on resume — they ran pre-interrupt
+            assert drafter_calls == 1, "Drafter re-ran on resume — Rule 1 violation"
+            assert critic_calls == 1, "Critic re-ran on resume — Rule 1 violation"
+
+    # Reset env for downstream tests
+    monkeypatch.setenv("MULTIAGENT_ENABLED", "0")
+    importlib.reload(src.graph)

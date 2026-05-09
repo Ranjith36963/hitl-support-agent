@@ -31,6 +31,12 @@ async def _llm_judge(payload: dict[str, Any]) -> dict[str, Any]:
     """Call the LLM to score the draft. Returns {verdict, severity, feedback}.
 
     Module-level so tests can patch `src.agents.critic._llm_judge`.
+
+    Failure mode: if the LLM returns malformed JSON (response_format=json_object
+    is reliable on DeepSeek but not bulletproof), escalate-on-uncertainty —
+    return a `revise` verdict at severity 0.5. This matches the safety contract:
+    when the auditor itself fails, lower draft_confidence so Gate 2 escalates
+    to a human, never silently pass through.
     """
     client = get_llm()
     resp = await client.chat.completions.create(
@@ -42,7 +48,17 @@ async def _llm_judge(payload: dict[str, Any]) -> dict[str, Any]:
         response_format={"type": "json_object"},
         temperature=0.1,  # determinism > creativity for an auditor
     )
-    return json.loads((resp.choices[0].message.content or "").strip())
+    raw = (resp.choices[0].message.content or "").strip()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # Escalate-on-uncertainty — Critic failure must NOT auto-pass. Lowering
+        # draft_confidence (via severity 0.5) routes to Gate 2 → human review.
+        return {
+            "verdict": "revise",
+            "severity": 0.5,
+            "feedback": "Critic returned malformed JSON; recommend human review.",
+        }
 
 
 @traceable(run_type="chain", name="critic_agent")

@@ -120,12 +120,14 @@ The outer graph is unchanged (still 15 nodes). Drafter and Critic run inside a b
 - **Idempotent send** — `sent_message_id` lock unchanged.
 - **Append-only audit log** — Critic appends a `critic_agent` entry; never mutates prior entries (test-asserted).
 
-### Toggle (one env var, instant rollback)
+### Toggle (one env var)
 
 ```bash
 MULTIAGENT_ENABLED=1 python -m src.server  # v4 multi-agent
-MULTIAGENT_ENABLED=0 python -m src.server  # v3 single-agent (default)
+MULTIAGENT_ENABLED=0 python -m src.server  # v3 single-agent (comparison artifact — see below)
 ```
+
+> **Honest framing on v3 path:** v3 is retained as the **comparison artifact** for the v3-vs-v4 iteration story above (`eval/results_v3_live.json` vs `eval/results_v4_live.json`), **not** as a "production rollback" — this is a portfolio build with no live traffic, so calling it production-rollback would be cosplay. After the comparison has served its portfolio purpose, v3 path will be removed in v4.1 and `MULTIAGENT_ENABLED=1` becomes the default. Code-level deprecation marker is in `src/graph.py` next to the flag.
 
 ### v3 vs v4 metrics (10 hand-curated tickets, live DeepSeek V3 via OpenRouter)
 
@@ -135,6 +137,9 @@ MULTIAGENT_ENABLED=0 python -m src.server  # v3 single-agent (default)
 | Escalation precision | 100.0% | 90.0% | -10 pp *(see t07 below)* |
 | **`false_auto_send_rate`** | **0.0%** | **0.0%** | **unchanged (safety invariant)** ✅ |
 | Response quality (LLM-judge) | 4.20 / 5 | 4.20 / 5 | 0.00 |
+| Cost per ticket | *deferred to v4.1* | *deferred to v4.1* | — |
+
+> **Cost row honestly deferred.** Per-call token + price instrumentation requires reading `resp.usage.prompt_tokens` / `completion_tokens` from every OpenAI response and accumulating with a per-model price table. That instrumentation is a v4.1 task (issue: v4.1-cost-tracking). The shortcut — hardcoding a model→price table or estimating from token counts alone — would produce numbers that drift the moment OpenRouter changes pricing. **No fake cost numbers in the README.**
 
 **Honest finding — what the Critic did:** Of 10 tickets, **1 flipped outcome under v4**. Ticket `eval-t07` ("technical question — basic_technical, high confidence") auto-sent under v3 and **escalated under v4**. The Critic lowered `draft_confidence` enough to push it below the 0.85 Gate 2 threshold. Whether this is *the Critic catching a nuance v3 missed* or *the Critic over-correcting on a safe case* needs more data than 10 tickets — but the safety metric (`false_auto_send_rate`) held at 0% in both versions. **The v4 Critic trades a small drop in escalation precision for an additional layer over every draft, without weakening the deterministic safety contract.**
 

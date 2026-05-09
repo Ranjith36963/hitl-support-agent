@@ -167,6 +167,13 @@ def build_full_graph_builder() -> StateGraph:
     # in place of v3 enrich_context_node + draft_response_node.
     # Default 0 keeps v3 single-agent path intact. Toggle without code change.
     # See docs/v4_multiagent.md for the architecture lock + invariants.
+    #
+    # DEPRECATION (v4.1): the v3 single-agent path is retained ONLY as a
+    # comparison artifact for the v3-vs-v4 portfolio iteration story
+    # (eval/results_v3_live.json vs eval/results_v4_live.json). It is NOT a
+    # production-rollback safety net for a 24h-build portfolio with no live
+    # traffic. Do not extend the v3 path. Do not refactor it. Schedule for
+    # removal in v4.1 once the comparison data has served its portfolio purpose.
     import os as _os
     _MULTIAGENT = _os.environ.get("MULTIAGENT_ENABLED", "0") == "1"
 
