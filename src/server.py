@@ -19,14 +19,22 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from slack_bolt.adapter.fastapi.async_handler import AsyncSlackRequestHandler
+# Load .env into os.environ BEFORE any src.* import. pydantic-settings reads
+# .env into the Settings object but does NOT propagate to os.environ — and
+# src/llm.py reads OPENROUTER_API_KEY directly from os.environ. Without
+# this line the server boots fine then 401s the first LLM call.
+from dotenv import load_dotenv
 
-from src import graph_runner
-from src.config import settings
-from src.email_listener import listen_forever
-from src.slack_handler import get_app, run_socket_mode
+load_dotenv()
+
+from fastapi import FastAPI, Request  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
+from slack_bolt.adapter.fastapi.async_handler import AsyncSlackRequestHandler  # noqa: E402
+
+from src import graph_runner  # noqa: E402
+from src.config import settings  # noqa: E402
+from src.email_listener import listen_forever  # noqa: E402
+from src.slack_handler import get_app, run_socket_mode  # noqa: E402
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")

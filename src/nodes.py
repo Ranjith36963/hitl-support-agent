@@ -158,7 +158,12 @@ def _build_approval_blocks(state: AgentState, kb_quote: str) -> list[dict[str, A
         },
         {
             "type": "section",
-            "block_id": ticket_id,  # block_id == thread_id; slack_handler reads it
+            # NOTE: block_id was previously set here as ticket_id, but Slack
+            # rejects messages with duplicate block_ids. The actions block
+            # below is the one that needs ticket_id (so the action payload
+            # can recover thread_id). Section gets a deterministic but
+            # distinct id for stability across edit/update calls.
+            "block_id": f"{ticket_id}-why",
             "text": {"type": "mrkdwn", "text": "*Why I paused*\n" + "\n".join(why_lines)},
         },
     ]
@@ -177,23 +182,34 @@ def _build_approval_blocks(state: AgentState, kb_quote: str) -> list[dict[str, A
             },
             {
                 "type": "actions",
+                # block_id on the ACTIONS block — Slack puts this on the
+                # button's action payload at body["actions"][0]["block_id"].
+                # Without it, that field would be an auto-generated hash and
+                # _thread_id_from_body couldn't recover the ticket_id.
+                "block_id": ticket_id,
                 "elements": [
                     {
                         "type": "button",
                         "style": "primary",
                         "text": {"type": "plain_text", "text": "Approve"},
                         "action_id": "approve_button",
+                        # `value` is round-tripped to the action payload at
+                        # body["actions"][0]["value"]. Defense-in-depth on top
+                        # of block_id — either path resolves the ticket_id.
+                        "value": ticket_id,
                     },
                     {
                         "type": "button",
                         "text": {"type": "plain_text", "text": "Edit"},
                         "action_id": "edit_button",
+                        "value": ticket_id,
                     },
                     {
                         "type": "button",
                         "style": "danger",
                         "text": {"type": "plain_text", "text": "Reject"},
                         "action_id": "reject_button",
+                        "value": ticket_id,
                     },
                 ],
             },
@@ -458,6 +474,12 @@ async def slack_notification_node(state: AgentState) -> dict[str, Any]:
     )
     return {
         "slack_message_ts": result.slack_message_ts,
+        # Replace the human-readable channel name (e.g. "#support-refunds")
+        # with the canonical channel ID (e.g. "C0B2U0W84MP") that Slack's
+        # `chat.update` API requires. Without this, every subsequent
+        # update_message call fails with `channel_not_found` and the
+        # approval message never visually changes after Approve/Edit/Reject.
+        "slack_channel": result.channel,
         "approval_status": "pending",
         "sla_deadline": sla_deadline,
         "audit_log": (state.get("audit_log") or [])

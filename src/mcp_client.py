@@ -370,9 +370,18 @@ async def _make_session(python: str, script_path: str):
 
     Yields an initialized ClientSession ready for tool calls.
     """
+    # CRITICAL: pass env=dict(os.environ) explicitly — by default the MCP
+    # stdio_client spawns the subprocess with a SANITIZED env (no inheritance),
+    # which means SLACK_BOT_TOKEN, GMAIL_APP_PASSWORD, etc. are missing in
+    # the child process and the MCP servers raise "X must be set in
+    # environment" at first tool call. The parent process has these via
+    # load_dotenv() in src/server.py — pass them through explicitly.
+    import os
+
     server_params = StdioServerParameters(
         command=python,
         args=[script_path],
+        env=dict(os.environ),
     )
     async with stdio_client(server_params) as (read_stream, write_stream):
         async with ClientSession(read_stream, write_stream) as session:

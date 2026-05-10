@@ -91,25 +91,36 @@ def verify_slack_signature(
 
 
 def _register_handlers(app: AsyncApp) -> None:
+    import logging
+
+    log = logging.getLogger(__name__)
+
     @app.action("approve_button")
     async def on_approve(ack: Any, body: dict[str, Any], client: Any) -> None:
         await ack()
         thread_id = _thread_id_from_body(body)
         approver = body.get("user", {}).get("id", "")
+        log.info("approve_button clicked: thread_id=%r approver=%r", thread_id, approver)
+        if not thread_id:
+            log.warning("approve_button: could not resolve thread_id from body — resume skipped")
+            return
         await _resume_graph(thread_id, {"action": "approve", "approver_id": approver})
 
     @app.action("reject_button")
     async def on_reject(ack: Any, body: dict[str, Any], client: Any) -> None:
         await ack()
+        thread_id = _thread_id_from_body(body)
+        log.info("reject_button clicked: thread_id=%r", thread_id)
         await client.views_open(
             trigger_id=body["trigger_id"],
-            view=_reject_modal(_thread_id_from_body(body)),
+            view=_reject_modal(thread_id),
         )
 
     @app.action("edit_button")
     async def on_edit(ack: Any, body: dict[str, Any], client: Any) -> None:
         await ack()
         thread_id = _thread_id_from_body(body)
+        log.info("edit_button clicked: thread_id=%r", thread_id)
         original_draft = _draft_from_body(body)
         await client.views_open(
             trigger_id=body["trigger_id"],
@@ -145,14 +156,26 @@ def _register_handlers(app: AsyncApp) -> None:
 
 
 def _thread_id_from_body(body: dict[str, Any]) -> str:
-    """The Slack message blocks carry `block_id="ticket-<id>"` so we can map
-    a button click back to the LangGraph thread_id (= ticket_id)."""
+    """Recover the LangGraph thread_id (== ticket_id) from a Slack action payload.
+
+    Three resolution paths in order of reliability:
+      1. button `value` (set explicitly by `_build_approval_blocks` in nodes.py)
+      2. action's `block_id` (Slack carries the parent block's block_id on
+         the action; we set this to ticket_id on the actions block)
+      3. message-level metadata (legacy fallback)
+    """
     actions = body.get("actions") or []
     if actions:
-        block_id = actions[0].get("block_id", "")
+        first = actions[0]
+        # 1. button value — most reliable, explicitly set by us
+        value = first.get("value", "")
+        if value.startswith("ticket-"):
+            return value
+        # 2. block_id on the actions block
+        block_id = first.get("block_id", "")
         if block_id.startswith("ticket-"):
-            return block_id  # `ticket-<uuid>` IS the thread_id
-    # Fallback: parse from message metadata
+            return block_id
+    # 3. metadata fallback
     msg = body.get("message", {})
     metadata = msg.get("metadata", {}).get("event_payload", {})
     return metadata.get("thread_id", "")
