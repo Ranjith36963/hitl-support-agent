@@ -403,7 +403,7 @@ These tags drive the README's failure-slice table — break down accuracy by `in
 
 ## Eval data
 
-The eval suite runs against the **Bitext Customer Support dataset** (50-ticket sample: 40 dev / 10 holdout). Five evaluators run via LangSmith:
+The eval suite runs against **10 hand-curated tickets** — one per code path (`eval/dataset.py`), each exercising a distinct graph branch. External-benchmark eval (Bitext) is deferred to v4.1 and has not been used. Five evaluators run via LangSmith:
 1. Intent accuracy (exact-match against labels)
 2. Response quality (LLM-as-judge with rubric)
 3. Escalation precision (did the two-gate router send to human correctly?)
@@ -428,7 +428,7 @@ The eval suite runs against the **Bitext Customer Support dataset** (50-ticket s
 | LLM client + LangSmith tracing decorators | `src/llm.py` |
 | ACME SaaS Co fictional policy corpus | `data/acme_policies.md` |
 | Mock customer DB (Salesforce-shape) | `data/customers_seed.json` |
-| Bitext eval dataset (50-ticket sample) | `data/bitext_sample.csv` |
+| Hand-curated eval dataset (10 tickets, one per code path) | `eval/dataset.py` |
 | Restart / resume integration test | `tests/test_resume.py` |
 
 ## Future work

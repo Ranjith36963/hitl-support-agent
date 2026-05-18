@@ -241,7 +241,7 @@ Jamie still gets a reply via real email, threaded under her original. She's stil
 | **LLM / observability** | OpenRouter (DeepSeek), LangSmith tracing | — |
 | **Orchestration** | LangGraph + SQLite checkpointer | — |
 | **Tools** | Three capability-split MCP servers (Read / Email Write / Slack Write) | — |
-| **Eval data** | Bitext Customer Support dataset (public, intent-labeled, 27 intents — commonly used as a customer-support benchmark) | — |
+| **Eval data** | 10 hand-curated tickets, one per code path (`eval/dataset.py`) — external-benchmark eval (Bitext) deferred to v4.1 | — |
 | **Customer database** | — | `data/customers_seed.json` (Salesforce-shape) |
 | **CRM profiles** | — | Mock `get_crm_profile` returns shaped data |
 | **Policy corpus** | — | `data/acme_policies.md` (fictional ACME SaaS Co) |
@@ -253,7 +253,7 @@ Production swap at any layer is an MCP config change, not a graph rewrite.
 
 ## How we know the system actually works (eval)
 
-Five evaluators run against the **Bitext Customer Support dataset** (50-ticket sample: 40 dev / 10 holdout) via LangSmith:
+Five evaluators run against **10 hand-curated tickets** — one per code path, each exercising a distinct graph branch (`eval/dataset.py`) — via LangSmith. (A public benchmark such as Bitext as a real holdout is deferred to v4.1; it has not been used.)
 1. **Intent accuracy** — exact-match against labels
 2. **Response quality** — LLM-as-judge with rubric
 3. **Escalation precision** — did the two-gate router send to human correctly?

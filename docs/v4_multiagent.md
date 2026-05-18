@@ -102,7 +102,7 @@ This is **not** a v4 blocker — the data exists, just not in the most ergonomic
 
 ## A/B agent-model swap experiment (portfolio set-piece)
 
-Run Researcher on DeepSeek V3 (default) vs. Haiku-tier (cheaper). Compare on the 50-ticket Bitext sample:
+Run Researcher on DeepSeek V3 (default) vs. Haiku-tier (cheaper). Compare on the 10-ticket hand-curated eval set:
 
 - `tool_selection_precision` (does Haiku still pick the right tools?)
 - `agent_cost_breakdown` (does Haiku save real money?)
@@ -152,7 +152,7 @@ Cut for v4 24h scope:
 
 - All 3 agents implemented as compiled sub-graphs in `src/agents/`
 - v3 graph still runs cleanly (sub-graph slot is reversible — feature flag `MULTIAGENT_ENABLED`)
-- 5 new evaluators populated with real numbers on the 50-ticket Bitext sample
+- 5 new evaluators populated with real numbers on the 10-ticket hand-curated eval set
 - v3 vs v4 comparison table in README with REAL numbers (response_quality, escalation_precision, false_auto_send_rate, agent_cost_breakdown)
 - A/B model swap experiment results in README
 - LangSmith trace screenshots showing nested agent run-trees

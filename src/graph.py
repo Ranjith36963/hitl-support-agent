@@ -168,21 +168,24 @@ def build_full_graph_builder() -> StateGraph:
     # Default 0 keeps v3 single-agent path intact. Toggle without code change.
     # See docs/v4_multiagent.md for the architecture lock + invariants.
     #
-    # DEPRECATION (v4.1): the v3 single-agent path is retained ONLY as a
-    # comparison artifact for the v3-vs-v4 portfolio iteration story
-    # (eval/results_v3_live.json vs eval/results_v4_live.json). It is NOT a
-    # production-rollback safety net for a 24h-build portfolio with no live
-    # traffic. Do not extend the v3 path. Do not refactor it.
+    # BOTH PATHS RETAINED INTENTIONALLY — do NOT delete the v3 path.
+    # The v3-vs-v4 head-to-head IS the deliverable, not a stepping stone.
+    # The 10-ticket live eval (eval/results_v3_live.json vs
+    # eval/results_v4_live.json) found v4 did NOT beat v3: they tie on the
+    # primary safety metric (false_auto_send_rate = 0%) and on response
+    # quality, and v3 is ahead on escalation precision (100% vs 90% — v4
+    # over-escalated eval-t07). The Critic is structurally one-directional:
+    # it can only LOWER draft_confidence, so v4 escalates >= v3 always and
+    # cannot beat a v3 already at 100%. See discussion.md for the full audit.
     #
-    # CONCRETE REMOVAL TRIGGER (any one is sufficient):
-    #   1. Demo 4 (Critic intercept) recorded and uploaded — comparison data
-    #      now lives in the demo video, not in runtime code.
-    #   2. First portfolio interview cycle complete — recruiters who care about
-    #      the v3-vs-v4 narrative have already seen it.
-    #   3. v4.1 plan starts execution — that plan owns the removal task.
-    # When any trigger fires: delete the if/else above, remove src.nodes
-    # enrich_context_node + draft_response_node from src/nodes.py, retire
-    # tests/test_integration_smoke.py, default MULTIAGENT_ENABLED → 1.
+    # Consequences for this flag:
+    #   - Default stays MULTIAGENT_ENABLED=0 (v3) — the default must reflect
+    #     the measured-best path, and v3 won.
+    #   - Do NOT flip the default to v4 or delete the v3 nodes. Promoting the
+    #     version that lost the eval would turn an honest result into a quiet
+    #     misrepresentation.
+    #   - Keeping v3 costs almost nothing (two node functions); the honest
+    #     A/B comparison is worth far more than the small cleanup saving.
     import os as _os
     _MULTIAGENT = _os.environ.get("MULTIAGENT_ENABLED", "0") == "1"
 

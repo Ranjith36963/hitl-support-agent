@@ -57,7 +57,7 @@ Skips weak signals:
 | Edit fallback UI | Minimal HTML/JS (only opened from the Slack "Edit" button) |
 | Tool integration | MCP (custom servers, split read/write) |
 | Policy corpus | Fictional **ACME SaaS Co** policy docs (`data/acme_policies.md`) |
-| Eval dataset | Bitext Customer Support |
+| Eval dataset | 10 hand-curated tickets, one per code path (`eval/dataset.py`) |
 | Build agent | Claude Code |
 
 ### What's real vs mocked
@@ -68,7 +68,7 @@ Skips weak signals:
 | Approval channel | Slack workspace + multi-channel routing | — |
 | LangGraph + LangSmith | Full implementation | — |
 | MCP servers | Custom read + write servers | — |
-| Eval data | Bitext dataset | — |
+| Eval data | 10 hand-curated tickets (`eval/dataset.py`) | — |
 | Customer database / CRM | — | `data/customers_seed.json` (Salesforce-shape) |
 | Policy corpus | — | `data/acme_policies.md` (fictional ACME SaaS Co) |
 | Ticketing system | — | Direct email → LangGraph (no Zendesk) |
@@ -587,10 +587,10 @@ README line:
 
 ### Dataset
 
-- Source: Bitext Customer Support dataset
-- 50 test cases for 24h build (sample)
-- Mix of intents, sentiments, risk levels
-- Hand-labeled expected approval status
+- Source: 10 hand-curated tickets, one per code path (`eval/dataset.py`)
+- Each ticket exercises a distinct graph branch (FAQ auto-send, refund, angry complaint, enterprise+risk, repeated reject, …)
+- Mix of intents, sentiments, risk levels — author-supplied `expected_intent` / `expected_outcome`
+- External-benchmark eval (Bitext public dataset) deferred to v4.1 — not yet used
 
 ### Target metrics (v3)
 
@@ -617,16 +617,16 @@ Numbers filled in AFTER actual eval runs. No fake metrics.
 
 ## 10. Data
 
-**Source:** Bitext Customer Support Dataset
-- Public, free
-- 27 intents, real tickets
-- Used for both training and eval
+**Source:** 10 hand-curated eval tickets — `eval/dataset.py`
+- One ticket per code path; each exercises a distinct graph branch
+- Author-supplied `expected_intent`, `expected_outcome`, `canned_classification` / `canned_draft`
+- Used for eval only (no training)
 
-**Sample size for 24h build:** 50 tickets
+**Sample size:** 10 tickets
 
-**Splits:**
-- 40 for development testing
-- 10 held-out for final eval
+**External benchmark (deferred to v4.1):** the Bitext Customer Support dataset
+(public, 27 intents, on Hugging Face) is a *candidate* holdout set — it has not
+been downloaded or wired in. The repo has never run on Bitext data.
 
 ---
 
@@ -639,9 +639,9 @@ support-agent/
 ├── .env.example                # GMAIL_USER, GMAIL_APP_PASSWORD, SLACK_BOT_TOKEN,
 │                               # SLACK_SIGNING_SECRET, OPENROUTER_API_KEY, LANGSMITH_API_KEY
 ├── data/
-│   ├── bitext_sample.csv       # 50 eval tickets (40 dev / 10 holdout)
 │   ├── customers_seed.json     # mock CRM (Salesforce-shape) — customer profiles
-│   └── acme_policies.md        # fictional ACME SaaS Co policy corpus (refunds, cancellations, escalations)
+│   ├── acme_policies.md        # fictional ACME SaaS Co policy corpus (refunds, cancellations, escalations)
+│   └── prompts/                # agent system prompts (v4: researcher / drafter / critic)
 ├── mcp_server/
 │   ├── support_read.py         # READ:  get_crm_profile, get_customer_history, get_kb_article
 │   ├── support_email_write.py  # WRITE: send_email (Gmail SMTP, idempotent)
@@ -659,7 +659,7 @@ support-agent/
 │   ├── mcp_client.py           # MCP client(s) routing to read / email-write / slack-write
 │   └── server.py               # FastAPI app: Slack webhooks + edit modal + health
 ├── eval/
-│   ├── dataset.py              # LangSmith dataset upload (Bitext)
+│   ├── dataset.py              # 10 hand-curated eval tickets (one per code path)
 │   ├── evaluators.py           # 5 evaluators (intent, response, escalation, false-auto-send, slice)
 │   └── run_experiments.py      # v1 → v2 → v3 runs
 ├── ui/
@@ -681,7 +681,7 @@ support-agent/
 - OpenRouter account + API key
 - LangSmith account + API key
 - Project folder, deps installed
-- Bitext dataset downloaded (50 sample)
+- Eval tickets hand-curated (10, one per code path)
 - Claude Code initialized
 
 **Hours 2-6: Core graph**
@@ -906,7 +906,7 @@ Project is "done" when:
 - Kill-server-resume demo recorded (server killed mid-pause → Slack message buttons still resume on restart via `slack_message_ts`)
 - Approve-with-edits demo recorded (Slack modal edit; both drafts in audit log)
 - SLA timeout demo recorded (auto-escalate to Manual Queue + Slack notice)
-- 5 evaluators run on 50-ticket Bitext dataset
+- 5 evaluators run on the 10-ticket hand-curated eval set
 - v1 → v2 → v3 metrics table populated with REAL numbers
 - README complete with all sections including the explicit "real vs mocked" table
 - Public LangSmith trace links with full tag set in README
@@ -924,7 +924,6 @@ Facts used in this spec:
 - LangChain 2026 State of Agent Engineering: observability is table stakes
 - LangGraph docs: durable execution, interrupts, checkpointers
 - LangSmith docs: evaluators, datasets, tracing
-- Bitext Customer Support Dataset: real public data
 
 No fabricated metrics. No invented features. Numbers in eval tables filled in only after real runs.
 
