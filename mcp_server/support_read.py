@@ -209,16 +209,16 @@ def get_customer_history(customer_email: str) -> list[dict[str, Any]]:
     return list(history)
 
 
-@mcp.tool()
-def get_kb_article(query: str) -> dict[str, Any]:
-    """Search ACME policy corpus for chunks relevant to *query*.
+def search_kb(query: str) -> dict[str, Any]:
+    """Keyword-overlap search of the ACME policy corpus for *query*.
 
-    Returns: dict with keys:
-      matched_sections (list of section headings),
-      verbatim_quote (the most relevant full sentence from the corpus),
-      policy_references (list of policy section IDs, e.g. ["ACME 4.2.1"]).
-    Used by Enrich Context to populate policy_matches in AgentState and
-    to supply the KB justification quote rendered in Slack approval messages.
+    Plain function (no MCP wrapper) so non-MCP callers — notably the eval
+    harness — can run the EXACT production KB retrieval logic instead of
+    injecting canned policy matches. `get_kb_article` is the MCP tool that
+    wraps this.
+
+    Returns: dict with keys matched_sections / verbatim_quote /
+    policy_references.
     """
     text = _load_policies()
     query_lower = query.lower()
@@ -264,6 +264,20 @@ def get_kb_article(query: str) -> dict[str, Any]:
         "verbatim_quote": verbatim_quote,
         "policy_references": policy_references,
     }
+
+
+@mcp.tool()
+def get_kb_article(query: str) -> dict[str, Any]:
+    """Search ACME policy corpus for chunks relevant to *query*.
+
+    Returns: dict with keys:
+      matched_sections (list of section headings),
+      verbatim_quote (the most relevant full sentence from the corpus),
+      policy_references (list of policy section IDs, e.g. ["ACME 4.2.1"]).
+    Used by Enrich Context to populate policy_matches in AgentState and
+    to supply the KB justification quote rendered in Slack approval messages.
+    """
+    return search_kb(query)
 
 
 if __name__ == "__main__":

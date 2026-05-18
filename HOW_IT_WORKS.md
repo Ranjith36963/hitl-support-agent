@@ -253,7 +253,7 @@ Production swap at any layer is an MCP config change, not a graph rewrite.
 
 ## How we know the system actually works (eval)
 
-Five evaluators run against **10 hand-curated tickets** — one per code path, each exercising a distinct graph branch (`eval/dataset.py`) — via LangSmith. (A public benchmark such as Bitext as a real holdout is deferred to v4.1; it has not been used.)
+Five evaluators run against **10 hand-curated tickets** — one per code path, each exercising a distinct graph branch (`eval/dataset.py`) — via LangSmith. A real 10-ticket Bitext eval has since been run as well (`eval/bitext_findings.md`, 10 of Bitext's 27 intents); a larger external sweep is future work.
 1. **Intent accuracy** — exact-match against labels
 2. **Response quality** — LLM-as-judge with rubric
 3. **Escalation precision** — did the two-gate router send to human correctly?

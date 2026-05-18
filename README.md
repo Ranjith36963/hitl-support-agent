@@ -145,7 +145,9 @@ MULTIAGENT_ENABLED=0 python -m src.server  # v3 single-agent (comparison artifac
 
 **Honest bottom line: v4 did not beat v3.** On this 10-ticket set the two tie on the primary safety metric (`false_auto_send_rate` 0% both) and on response quality; the only metric that moved — escalation precision — moved *against* v4 (100% → 90%). One ticket separates them, which is within noise for n=10. And the gap is structural, not a tuning accident: the Critic can only ever *lower* `draft_confidence` (`src/agents/critic.py` multiplies it by `1 - severity*0.5`, always in `[0.5, 1.0]`), so v4 escalates **≥** v3 on every ticket and cannot beat a v3 that is already at 100% escalation precision. The honest takeaway is the measurement discipline: the multi-agent version was built, evaluated head-to-head, did not win — so the simpler path stays the default rather than being promoted on novelty. Full audit and root-cause analysis: [`discussion.md`](./discussion.md).
 
-Raw run artifacts: [`eval/results_v3_live.json`](./eval/results_v3_live.json) · [`eval/results_v4_live.json`](./eval/results_v4_live.json)
+**External cross-check — real Bitext data.** A second, independent eval on 10 real customer messages from the Bitext Customer Support dataset (run live through both versions) reached the same verdict: v3 and v4 produced identical outcomes on 9 of 10 tickets, and the one difference is run-to-run LLM noise on a node v4 does not even change. Intent accuracy fell to 50–60% on real external text (vs ~70–100% hand-curated) — but `false_auto_send_rate` held at 0% in both. Full write-up: [`eval/bitext_findings.md`](./eval/bitext_findings.md).
+
+Raw run artifacts: [`eval/results_v3_live.json`](./eval/results_v3_live.json) · [`eval/results_v4_live.json`](./eval/results_v4_live.json) · [`eval/results_bitext_v3.json`](./eval/results_bitext_v3.json) · [`eval/results_bitext_v4.json`](./eval/results_bitext_v4.json)
 
 **Multi-agent-specific evaluators** (`eval/multiagent_evaluators.py`) are wired but not yet aggregated into the v3-vs-v4 table — they require LangSmith run-tree introspection rather than the existing per-ticket harness:
 
@@ -267,7 +269,7 @@ docs/   architecture.md
 - **v1 / v2 ablations** — would need separate graph variants run on the same dataset; cut to fit the build window and avoid any temptation to invent numbers
 - **Demo videos** — durable-execution kill-restart, approve-with-edits, SLA timeout. Scripts ready (see [`spec.md`](./spec.md) §13); recording happens after secrets land
 - **6 Slack channels → 3** — `#support-legal`, `#support-enterprise`, `#support-billing` are config additions to `slack_router.py`, not architecture changes
-- **External-benchmark eval (Bitext)** — the eval set is 10 hand-curated tickets, one per code path (`eval/dataset.py`); one-per-branch is more diagnostic than random samples for routing logic, but a hand-written set cannot surprise its author. Running a public benchmark (Bitext Customer Support, on Hugging Face) as a real holdout is a v4.1 task — **not yet done; the repo has never used Bitext data**
+- **External-benchmark eval (Bitext)** — a real 10-ticket Bitext eval now exists: 10 of Bitext's SaaS-adjacent intents, run live through both v3 and v4 (`eval/bitext_dataset.py`, data frozen in `data/bitext_eval_10.csv`, full write-up in [`eval/bitext_findings.md`](./eval/bitext_findings.md)). It confirmed v3≈v4 and showed intent accuracy drops to 50–60% on real external text vs ~70–100% on the hand-curated set. Still partial — 10 of Bitext's 27 intents, n=10; a larger holdout sweep remains future work
 - **Postgres production checkpointer** — SQLite is sufficient for single-writer demo; AsyncPostgresSaver is a one-line swap
 - **Webhook-based inbound mail** — IMAP IDLE works for demo; SES / SendGrid Parse / Postmark for production scale
 - **Online evals** — current 10-ticket eval is offline; sampling layer over live traces is future work

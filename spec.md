@@ -590,7 +590,7 @@ README line:
 - Source: 10 hand-curated tickets, one per code path (`eval/dataset.py`)
 - Each ticket exercises a distinct graph branch (FAQ auto-send, refund, angry complaint, enterprise+risk, repeated reject, …)
 - Mix of intents, sentiments, risk levels — author-supplied `expected_intent` / `expected_outcome`
-- External-benchmark eval (Bitext public dataset) deferred to v4.1 — not yet used
+- External-benchmark eval: a 10-intent Bitext first batch has been run (see `eval/bitext_findings.md`); full 27-intent sweep deferred
 
 ### Target metrics (v3)
 
@@ -624,9 +624,11 @@ Numbers filled in AFTER actual eval runs. No fake metrics.
 
 **Sample size:** 10 tickets
 
-**External benchmark (deferred to v4.1):** the Bitext Customer Support dataset
-(public, 27 intents, on Hugging Face) is a *candidate* holdout set — it has not
-been downloaded or wired in. The repo has never run on Bitext data.
+**External benchmark (first batch done):** 10 real tickets from the Bitext
+Customer Support dataset (public, 27 intents, on Hugging Face) have been wired
+in — `data/bitext_eval_10.csv`, loaded by `eval/bitext_dataset.py`, findings in
+`eval/bitext_findings.md`. This covers 10 of Bitext's 27 intents; a larger
+holdout sweep is future work.
 
 ---
 

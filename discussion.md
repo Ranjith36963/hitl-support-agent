@@ -291,13 +291,15 @@ An independent advisor review was run on this decision. Its conclusion:
 
 ## 7. Recommended actions
 
-> **Status update (2026-05-18).** A corrective documentation commit has executed
-> the doc-honesty subset of this list. **Done:** item 1 path (a), item 3, item 4
-> (see the ✅ marks below). **Still open:** item 1 path (b), all of item 2, and
-> item 5 (see the ⬜ marks). The frozen dated plan docs (`adviserplan.md`,
-> `docs/superpowers/plans/*`) were intentionally left untouched — they are
-> historical records of plans, not present-tense claims, so rewriting them
-> would itself falsify history.
+> **Status update (2026-05-18).** Two work sessions have acted on this list.
+> (1) A corrective documentation commit closed the doc-honesty subset: item 1
+> path (a), item 3, item 4. (2) A Bitext-eval commit closed item 1 path (b) as
+> a first batch and part of item 2: the rigged KB injection was removed and the
+> result files now self-identify. **Still open:** the rest of item 2
+> (adversarial tickets, v4-value metrics), a larger Bitext sweep, and item 5.
+> The frozen dated plan docs (`adviserplan.md`, `docs/superpowers/plans/*`)
+> were intentionally left untouched — they are historical records of plans,
+> not present-tense claims, so rewriting them would itself falsify history.
 
 Ordered by urgency.
 
@@ -308,22 +310,30 @@ Ordered by urgency.
      **DONE** — relabelled across `CLAUDE.md`, `README.md`, `spec.md`,
      `HOW_IT_WORKS.md`, `docs/architecture.md`, `docs/v4_multiagent.md`; the
      nonexistent `data/bitext_sample.csv` reference removed.
-   - ⬜ (b) Actually obtain the Bitext dataset, add a real eval data file, and
-     run a real holdout eval. A few hours of work; makes a Bitext claim true.
-     **STILL OPEN — deferred to v4.1.**
-2. ⬜ **Fix the eval methodology** so v4 can be judged fairly. **STILL OPEN.**
-   - Remove the expected-intent-driven KB injection (§4.2a) — retrieve KB
-     matches the same way production does, or from a fixed fixture not keyed on
-     the answer.
-   - Add adversarial / bad-draft tickets where a single-agent Drafter produces
-     something subtly wrong, so the Critic has something real to catch.
-   - Add metrics that measure v4's actual value: Critic-intercept rate,
-     first-draft acceptance rate, human reject-loop count. Without one of these,
-     v4 is graded only on escalation precision — an axis where the
+   - 🟡 (b) Actually obtain the Bitext dataset, add a real eval data file, and
+     run a real holdout eval. **FIRST BATCH DONE (2026-05-18):** 10 real Bitext
+     tickets selected (`eval/select_bitext.py` -> `data/bitext_eval_10.csv`),
+     loaded by `eval/bitext_dataset.py`, run live through v3 and v4. Findings
+     in `eval/bitext_findings.md` — v3≈v4 confirmed on real data. Covers 10 of
+     Bitext's 27 intents; a larger holdout sweep is still open.
+2. 🟡 **Fix the eval methodology** so v4 can be judged fairly. **PARTIALLY DONE.**
+   - ✅ Remove the expected-intent-driven KB injection (§4.2a) — DONE. The eval
+     harness now runs the real production `search_kb()` over `acme_policies.md`
+     on the message content; a policy_match is no longer injected from the
+     expected answer.
+   - ⬜ Add adversarial / bad-draft tickets where a single-agent Drafter
+     produces something subtly wrong, so the Critic has something real to
+     catch. STILL OPEN.
+   - ⬜ Add metrics that measure v4's actual value: Critic-intercept rate,
+     first-draft acceptance rate, human reject-loop count. Without one of
+     these, v4 is graded only on escalation precision — an axis where the
      one-directional Critic (§3.1) is structurally capped and cannot win.
-   - Parameterize `_write_results_md` so output files self-identify as v3 or v4
-     (§4.2d) — today the v4 result file literally opens with the title "v3".
-   - Drop the stale "Skipped without OPENROUTER_API_KEY" Notes column (§4.2f).
+     STILL OPEN.
+   - ✅ Parameterize `_write_results_md` so output files self-identify as v3 or
+     v4 (§4.2d) — DONE. Result files are now named `results_{dataset}_{version}`
+     and the title/column carry the version + dataset.
+   - ✅ Drop the stale "Skipped without OPENROUTER_API_KEY" Notes column
+     (§4.2f) — DONE.
 3. ✅ **Correct the docs.** **DONE** — `CLAUDE.md` test count fixed 118 → 136
    (and the stale per-suite table in `README.md` rebuilt to the real 16 files);
    the `src/graph.py` deprecation comment and the README v4 framing rewritten

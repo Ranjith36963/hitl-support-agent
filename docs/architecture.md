@@ -403,7 +403,7 @@ These tags drive the README's failure-slice table — break down accuracy by `in
 
 ## Eval data
 
-The eval suite runs against **10 hand-curated tickets** — one per code path (`eval/dataset.py`), each exercising a distinct graph branch. External-benchmark eval (Bitext) is deferred to v4.1 and has not been used. Five evaluators run via LangSmith:
+The eval suite runs against **10 hand-curated tickets** — one per code path (`eval/dataset.py`), each exercising a distinct graph branch. A real 10-ticket Bitext eval has also been run (`eval/bitext_findings.md`, 10 of Bitext's 27 intents); a larger external sweep is future work. Five evaluators run via LangSmith:
 1. Intent accuracy (exact-match against labels)
 2. Response quality (LLM-as-judge with rubric)
 3. Escalation precision (did the two-gate router send to human correctly?)

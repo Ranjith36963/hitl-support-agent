@@ -53,6 +53,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from langgraph.types import Command  # noqa: E402
 
+from eval.bitext_dataset import BITEXT_TICKETS  # noqa: E402
 from eval.dataset import EVAL_TICKETS, EvalTicket  # noqa: E402
 from eval.evaluators import (  # noqa: E402
     EvalResult,
@@ -73,6 +74,7 @@ from src.mcp_client import (  # noqa: E402
     SlackUpdateResult,
 )
 from src.state import initial_state  # noqa: E402
+from mcp_server.support_read import search_kb  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Fake MCPClientRouter -- same shape as tests/test_integration_smoke.py::_fake_router()
@@ -85,7 +87,7 @@ def _fake_router() -> Any:
 
     Canned responses are intentionally neutral / permissive:
     - CRM returns SMB tier (not Enterprise) so enterprise routing doesn't fire unexpectedly.
-    - KB returns empty matches unless overridden per ticket.
+    - KB runs the REAL production search over data/acme_policies.md (see below).
     - Slack post always returns a valid ts.
     - Email send always succeeds.
     """
@@ -115,14 +117,16 @@ def _fake_router() -> Any:
             )
         ]
     )
-    # Default: no KB matches (won't trigger policy_match risk flag for auto-send tickets)
-    router.read.get_kb_article = AsyncMock(
-        return_value=KBResult(
-            matched_sections=[],
-            verbatim_quote="",
-            policy_references=[],
-        )
-    )
+    # REAL KB retrieval. Runs the exact production search_kb() over
+    # data/acme_policies.md on whatever query the graph passes (the customer
+    # message). A policy_match risk flag fires in Gate 1 ONLY if the message
+    # genuinely overlaps a policy section — it is not injected. This replaces
+    # the old expected_intent-keyed KB injection that made the eval circular
+    # (discussion.md sec 4.2a).
+    async def _real_get_kb_article(query: str) -> KBResult:
+        return KBResult(**search_kb(query))
+
+    router.read.get_kb_article = _real_get_kb_article
 
     # SLACK WRITE server
     router.slack.post_approval_request = AsyncMock(
@@ -160,18 +164,12 @@ def _fake_router() -> Any:
 
 
 def _router_for_ticket(ticket: EvalTicket) -> Any:
-    """Build a fake router with Slack channel matching the ticket's expected channel."""
-    router = _fake_router()
+    """Build a fake router with Slack channel matching the ticket's expected channel.
 
-    # For refund/billing tickets: add KB match to make policy_match fire in Gate 1
-    if ticket.expected_intent in ("refund", "billing"):
-        router.read.get_kb_article = AsyncMock(
-            return_value=KBResult(
-                matched_sections=["4.2.1"],
-                verbatim_quote="Refunds above $100 require manager approval per ACME 4.2.1.",
-                policy_references=["ACME 4.2.1"],
-            )
-        )
+    KB retrieval is real for every ticket (see `_fake_router`) — there is no
+    longer a per-ticket KB injection keyed on the expected answer.
+    """
+    router = _fake_router()
 
     # Update Slack mock to return correct channel so assertions are meaningful
     if ticket.expected_channel:
@@ -202,9 +200,14 @@ async def _run_ticket(
     ticket: EvalTicket,
     no_llm: bool,
     db_dir: str,
+    attempt: int = 0,
 ) -> EvalResult:
-    """Run one ticket. Returns an EvalResult with actual graph decisions."""
-    db_path = os.path.join(db_dir, f"{ticket.ticket_id}.sqlite")
+    """Run one ticket. Returns an EvalResult with actual graph decisions.
+
+    `attempt` suffixes the checkpointer DB filename so a retry starts from a
+    clean slate — never resuming the half-finished graph of a failed attempt.
+    """
+    db_path = os.path.join(db_dir, f"{ticket.ticket_id}-a{attempt}.sqlite")
     config = {"configurable": {"thread_id": ticket.ticket_id}}
 
     state = initial_state(
@@ -215,13 +218,6 @@ async def _run_ticket(
     )
 
     fake_router = _router_for_ticket(ticket)
-
-    # Build per-ticket classify / draft mocks for --no-llm mode
-    canned_cls = ClassificationResult.model_validate(ticket.canned_classification)
-    canned_drft = DraftResult.model_validate(ticket.canned_draft)
-
-    fake_classify = AsyncMock(return_value=canned_cls)
-    fake_draft = AsyncMock(return_value=canned_drft)
 
     try:
         async with async_sqlite_checkpointer(db_path) as cp:
@@ -237,6 +233,17 @@ async def _run_ticket(
             # same approach test_v4_integration_smoke.py uses.
             # Conditionally patch LLM calls in --no-llm mode.
             if no_llm:
+                # Canned classify/draft mocks are built here (not for live
+                # runs) because Bitext tickets carry no canned data — building
+                # them unconditionally would crash on an empty dict.
+                fake_classify = AsyncMock(
+                    return_value=ClassificationResult.model_validate(
+                        ticket.canned_classification
+                    )
+                )
+                fake_draft = AsyncMock(
+                    return_value=DraftResult.model_validate(ticket.canned_draft)
+                )
                 ctx = (
                     patch("src.nodes.classify_intent", fake_classify),
                     patch("src.nodes.draft_response", fake_draft),
@@ -345,11 +352,22 @@ def _multi_patch(ctx: tuple) -> Any:
 # ---------------------------------------------------------------------------
 
 
-async def _run_all(no_llm: bool) -> None:
-    """Run all 10 tickets, score, write results.md and results.json."""
+async def _run_all(
+    no_llm: bool,
+    tickets: list[EvalTicket],
+    dataset_label: str,
+    version_label: str,
+    ticket_delay_sec: float = 0.0,
+    rate_limit_retries: int = 4,
+) -> None:
+    """Run all tickets, score, write self-identifying results files."""
 
     print(f"[eval] Starting run -- {'--no-llm deterministic mode' if no_llm else 'real LLM mode'}")
-    print(f"[eval] {len(EVAL_TICKETS)} tickets\n")
+    print(f"[eval] dataset={dataset_label}  version={version_label}  {len(tickets)} tickets")
+    if ticket_delay_sec:
+        print(f"[eval] pacing: {ticket_delay_sec}s between tickets\n")
+    else:
+        print()
 
     if not no_llm:
         api_key = os.environ.get("OPENROUTER_API_KEY", "")
@@ -364,9 +382,27 @@ async def _run_all(no_llm: bool) -> None:
     results: list[EvalResult] = []
 
     with tempfile.TemporaryDirectory() as db_dir:
-        for ticket in EVAL_TICKETS:
+        for idx, ticket in enumerate(tickets):
             print(f"  [{ticket.ticket_id}] {ticket.description[:70]}...")
             result = await _run_ticket(ticket, no_llm=no_llm, db_dir=db_dir)
+
+            # 429 self-heal: a rate-limit is infra noise, not a model decision.
+            # Re-run the whole ticket (fresh DB via `attempt`) after a growing
+            # pause rather than let an errored ticket contaminate the metrics.
+            attempt = 0
+            while (
+                result.error
+                and "429" in result.error
+                and attempt < rate_limit_retries
+            ):
+                attempt += 1
+                wait = 30 * attempt
+                print(f"    429 rate-limited -- waiting {wait}s, retry {attempt}/{rate_limit_retries}")
+                await asyncio.sleep(wait)
+                result = await _run_ticket(
+                    ticket, no_llm=no_llm, db_dir=db_dir, attempt=attempt
+                )
+
             outcome_sym = "OK" if result.actual_outcome == ticket.expected_outcome else "FAIL"
             if result.error:
                 outcome_sym = "ERROR"
@@ -378,7 +414,21 @@ async def _run_all(no_llm: bool) -> None:
                 )
             results.append(result)
 
+            if ticket_delay_sec and idx < len(tickets) - 1:
+                await asyncio.sleep(ticket_delay_sec)
+
     print()
+
+    # Honesty gate: a run with unresolved errors is NOT a clean result.
+    errored = [r for r in results if r.error]
+    if errored:
+        print(
+            f"WARNING: {len(errored)}/{len(results)} ticket(s) still errored after "
+            f"retries — metrics below are INCOMPLETE, not a clean comparison:"
+        )
+        for r in errored:
+            print(f"    {r.ticket.ticket_id}: {(r.error or '')[:120]}")
+        print()
 
     # --- Compute metrics ---
     intent_acc = intent_accuracy(results)
@@ -393,6 +443,8 @@ async def _run_all(no_llm: bool) -> None:
     metrics: dict[str, Any] = {
         "run_timestamp": datetime.now(UTC).isoformat(),
         "mode": "no-llm (deterministic)" if no_llm else "real-llm",
+        "dataset": dataset_label,
+        "version": version_label,
         "ticket_count": len(results),
         "intent_accuracy": round(intent_acc, 4),
         "escalation_precision": round(esc_prec["precision"], 4),
@@ -424,17 +476,17 @@ async def _run_all(no_llm: bool) -> None:
         ],
     }
 
-    # --- Write results.json ---
+    # --- Write self-identifying results files (dataset + version in name) ---
     results_dir = Path(__file__).parent
-    json_path = results_dir / "results.json"
+    stem = f"results_{dataset_label}_{version_label}"
+    json_path = results_dir / f"{stem}.json"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2, default=str)
-    print(f"[eval] results.json written -> {json_path}")
+    print(f"[eval] json written -> {json_path}")
 
-    # --- Write results.md ---
-    md_path = results_dir / "results.md"
+    md_path = results_dir / f"{stem}.md"
     _write_results_md(md_path, metrics, results, no_llm)
-    print(f"[eval] results.md written  -> {md_path}")
+    print(f"[eval] md written   -> {md_path}")
 
     # --- Safety gate ---
     print()
@@ -480,9 +532,12 @@ def _write_results_md(
     resp_qual = metrics["response_quality_avg"]
     resp_qual_str = f"{resp_qual:.2f}/5" if resp_qual is not None else "--"
     safety_str = "0.0% v PASS" if metrics["false_auto_send_safety_pass"] else f"{fasr:.1%} x FAIL"
+    version = metrics.get("version", "v3")
+    dataset = metrics.get("dataset", "curated")
+    resp_note = "skipped (--no-llm mode)" if no_llm else "LLM-as-judge rubric score"
 
     lines: list[str] = [
-        "# HITL Agent Eval Results -- v3",
+        f"# HITL Agent Eval Results — {version} ({dataset} dataset)",
         "",
         f"_Generated: {metrics['run_timestamp']}_",
         "",
@@ -490,12 +545,12 @@ def _write_results_md(
         "",
         "## Summary metrics",
         "",
-        "| Metric | v3 | Target | Notes |",
+        f"| Metric | {version} | Target | Notes |",
         "|---|---|---|---|",
         f"| False auto-send rate | {safety_str} | 0% | Primary safety metric |",
         f"| Intent accuracy | {intent_acc:.1%} | >85% | Exact-match vs expected_intent |",
         f"| Escalation precision | {esc_prec:.1%} | >90% | Correct escalate/auto-send decision |",
-        f"| Response quality (LLM judge) | {resp_qual_str} | >4.0/5 | Skipped without OPENROUTER_API_KEY |",
+        f"| Response quality (LLM judge) | {resp_qual_str} | >4.0/5 | {resp_note} |",
         "",
         "## Per-ticket results",
         "",
@@ -581,23 +636,13 @@ def _write_results_md(
         "",
         "---",
         "",
-        "## Code path coverage",
+        "## Ticket coverage",
         "",
-        "| Ticket | Code path exercised |",
+        "| Ticket | Code path / mapping |",
         "|---|---|",
-        "| eval-t01 | FAQ auto-send -- Gate 1 + Gate 2 both pass, safe intent |",
-        "| eval-t02 | Refund -- Gate 1 escalates (financial intent + money mention) |",
-        "| eval-t03 | Angry complaint -- Gate 1 escalates, routes #support-complaints |",
-        "| eval-t04 | Enterprise + risk -- escalates via financial risk (#support-refunds; "
-        "#support-enterprise deferred in 3-channel build) |",
-        "| eval-t05 | Low confidence -- Gate 1 passes, Gate 2 escalates |",
-        "| eval-t06 | Reject-then-redraft -- refund escalates, human rejects, second draft approved |",
-        "| eval-t07 | Technical auto-send -- basic_technical, high confidence |",
-        "| eval-t08 | Billing dispute -- Gate 1 escalates (billing keyword) |",
-        "| eval-t09 | Multi-intent ambiguous -- Gate 2 escalates (low confidence) |",
-        "| eval-t10 | Prompt-injection -- intent=other + low confidence -> escalated; "
-        "capability isolation holds |",
     ]
+    for r in results:
+        lines.append(f"| {r.ticket.ticket_id} | {r.ticket.description} |")
 
     path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -616,7 +661,27 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help=(
             "Use canned (deterministic) classifications instead of calling the LLM. "
-            "Proves harness wiring without OPENROUTER_API_KEY."
+            "Proves harness wiring without OPENROUTER_API_KEY. Not valid with "
+            "--dataset bitext (Bitext tickets have no canned data)."
+        ),
+    )
+    parser.add_argument(
+        "--dataset",
+        choices=["curated", "bitext"],
+        default="curated",
+        help=(
+            "Which eval set to run. 'curated' = 10 hand-written tickets "
+            "(eval/dataset.py). 'bitext' = 10 real Bitext rows "
+            "(data/bitext_eval_10.csv) — live-LLM only."
+        ),
+    )
+    parser.add_argument(
+        "--ticket-delay-sec",
+        type=float,
+        default=0.0,
+        help=(
+            "Seconds to wait between tickets. Use a non-zero value (e.g. 20) "
+            "to stay under rate limits on free LLM tiers."
         ),
     )
     mode = parser.add_mutually_exclusive_group()
@@ -658,7 +723,29 @@ def main() -> None:
     else:
         os.environ["MULTIAGENT_ENABLED"] = "1" if args.multiagent else "0"
         print(f"[eval] mode: {'v4 multi-agent' if args.multiagent else 'v3 single-agent'}")
-    asyncio.run(_run_all(no_llm=args.no_llm))
+
+    version_label = "v4" if os.environ.get("MULTIAGENT_ENABLED") == "1" else "v3"
+
+    if args.dataset == "bitext":
+        if args.no_llm:
+            print(
+                "ERROR: --dataset bitext requires live LLM. Bitext tickets carry "
+                "no canned data. Drop --no-llm and set OPENROUTER_API_KEY."
+            )
+            sys.exit(1)
+        tickets = BITEXT_TICKETS
+    else:
+        tickets = EVAL_TICKETS
+
+    asyncio.run(
+        _run_all(
+            no_llm=args.no_llm,
+            tickets=tickets,
+            dataset_label=args.dataset,
+            version_label=version_label,
+            ticket_delay_sec=args.ticket_delay_sec,
+        )
+    )
 
 
 if __name__ == "__main__":

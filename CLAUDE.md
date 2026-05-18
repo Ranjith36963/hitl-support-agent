@@ -7,7 +7,7 @@
 - **v3** (single-agent) and **v4** (multi-agent: Researcher + Drafter↔Critic) both live in the codebase.
 - Toggle: `MULTIAGENT_ENABLED=1` enables v4. Default 0 keeps v3 path.
 - **Both paths retained intentionally** — the v3↔v4 head-to-head IS the deliverable. v4 did NOT beat v3: they tie on the safety metric, v3 is ahead on escalation precision (100% vs 90%). v3 stays the default. Not scheduled for removal — see comment in `src/graph.py` and the full audit in `discussion.md`.
-- Live LLM eval results: both modes hold `false_auto_send_rate = 0%` on the 10-ticket hand-curated eval set. Real numbers in `README.md` v4 section.
+- Live LLM eval results: both modes hold `false_auto_send_rate = 0%` on the 10-ticket hand-curated eval set AND on the 10-ticket real Bitext eval. Real numbers in `README.md` v4 section and `eval/bitext_findings.md`.
 - Tests: 136/136 passing in both flag modes.
 
 ## Source docs
@@ -49,7 +49,7 @@ Agent-first, human-on-demand customer support agent. **Real Gmail** in/out (IMAP
 | Tools | **Three MCP servers** — Read / Email Write / Slack Write |
 | Policy corpus | `data/acme_policies.md` (fictional, RAG-retrieved) |
 | Backend | FastAPI |
-| Eval data | 10 hand-curated tickets, one per code path (`eval/dataset.py`) — external-benchmark eval (Bitext) deferred to v4.1 |
+| Eval data | 10 hand-curated tickets (`eval/dataset.py`) + 10 real Bitext tickets (`eval/bitext_dataset.py` — first batch, 10 of Bitext's 27 intents) |
 
 ## Graph node order — Slack post BEFORE interrupt!
 
@@ -135,4 +135,4 @@ Hardcoded keys · Single test case (no real eval set) · No restart-resume demo 
 ## Links
 
 - Repo: https://github.com/Ranjith36963/hitl-support-agent
-- Bitext (candidate external benchmark — not yet used; v4.1): https://huggingface.co/datasets/bitext/Bitext-customer-support-llm-chatbot-training-dataset
+- Bitext (external benchmark — 10-intent first batch wired in; see `eval/bitext_findings.md`): https://huggingface.co/datasets/bitext/Bitext-customer-support-llm-chatbot-training-dataset
