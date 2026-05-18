@@ -35,6 +35,9 @@
 > An earlier run was discarded: OpenRouter's free tier rate-limited it (429s
 > errored 3 v3 tickets / 1 v4 ticket). Contaminated numbers are not reported.
 > The harness now auto-retries 429s and paces tickets (`--ticket-delay-sec`).
+> In the clean re-run the 20s pacing alone kept the run under the rate limit —
+> the 429 auto-retry never had to fire. The retry is defense-in-depth; the
+> pacing is the load-bearing fix.
 
 ## Which version won? Neither.
 
@@ -98,8 +101,8 @@ One genuine miss:
 
 ## The real value of this eval
 
-- Intent accuracy on real Bitext text (50–60%) is well below the
-  hand-curated set (~70–100%). **That gap is the whole point** of an external
+- Intent accuracy on real Bitext text (50–60%) is below the hand-curated set
+  (70%, refreshed run). **That gap is the whole point** of an external
   benchmark — the classifier looks worse on messages the author didn't write.
 - But the safety contract (`false_auto_send_rate = 0%`) **held** on real,
   messy, unseen input. That is the genuinely reassuring result.

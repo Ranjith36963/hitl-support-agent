@@ -170,13 +170,13 @@ def build_full_graph_builder() -> StateGraph:
     #
     # BOTH PATHS RETAINED INTENTIONALLY — do NOT delete the v3 path.
     # The v3-vs-v4 head-to-head IS the deliverable, not a stepping stone.
-    # The 10-ticket live eval (eval/results_v3_live.json vs
-    # eval/results_v4_live.json) found v4 did NOT beat v3: they tie on the
-    # primary safety metric (false_auto_send_rate = 0%) and on response
-    # quality, and v3 is ahead on escalation precision (100% vs 90% — v4
-    # over-escalated eval-t07). The Critic is structurally one-directional:
-    # it can only LOWER draft_confidence, so v4 escalates >= v3 always and
-    # cannot beat a v3 already at 100%. See discussion.md for the full audit.
+    # The head-to-head eval found v4 did NOT beat v3. A refreshed 10-ticket
+    # live run (eval/results_curated_v3.json vs results_curated_v4.json) ties
+    # on every metric except response quality, where v3 is ahead; a real
+    # 10-ticket Bitext run (eval/bitext_findings.md) reached the same tie.
+    # The Critic is structurally one-directional: it can only LOWER
+    # draft_confidence, so v4 escalates >= v3 always and cannot beat a v3
+    # already at 100% escalation precision. See discussion.md for the audit.
     #
     # Consequences for this flag:
     #   - Default stays MULTIAGENT_ENABLED=0 (v3) — the default must reflect

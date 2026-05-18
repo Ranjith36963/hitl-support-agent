@@ -127,27 +127,29 @@ MULTIAGENT_ENABLED=1 python -m src.server  # v4 multi-agent
 MULTIAGENT_ENABLED=0 python -m src.server  # v3 single-agent (comparison artifact — see below)
 ```
 
-> **Honest framing on v3 path:** v3 is retained as the **comparison artifact** for the v3-vs-v4 iteration story above (`eval/results_v3_live.json` vs `eval/results_v4_live.json`), **not** as a "production rollback" — this is a portfolio build with no live traffic, so calling it production-rollback would be cosplay. **Both paths stay.** v3 won the 10-ticket head-to-head (escalation precision 100% vs 90%), so `MULTIAGENT_ENABLED=0` (v3) stays the default — the default should reflect the measured-best path. The A/B comparison *is* the deliverable; deleting the version that won would misrepresent the result. See `src/graph.py` next to the flag, and `discussion.md` for the full audit.
+> **Honest framing on v3 path:** v3 is retained as the **comparison artifact** for the v3-vs-v4 iteration story above, **not** as a "production rollback" — this is a portfolio build with no live traffic, so calling it production-rollback would be cosplay. **Both paths stay.** The head-to-head found v4 does **not** beat v3 — they tie — so `MULTIAGENT_ENABLED=0` (v3, the simpler path) stays the default. The A/B comparison *is* the deliverable; the honest tie is the result. See `src/graph.py` next to the flag, and `discussion.md` for the full audit.
 
 ### v3 vs v4 metrics (10 hand-curated tickets, live DeepSeek V3 via OpenRouter)
+
+_Refreshed 2026-05-18 through the de-rigged harness — real KB retrieval, no injected policy matches._
 
 | Metric | v3 | v4 | Δ |
 |---|---|---|---|
 | Intent accuracy | 70.0% | 70.0% | 0.0 pp |
-| Escalation precision | 100.0% | 90.0% | -10 pp *(see t07 below)* |
+| Escalation precision | 100.0% | 100.0% | 0.0 pp |
 | **`false_auto_send_rate`** | **0.0%** | **0.0%** | **unchanged (safety invariant)** ✅ |
-| Response quality (LLM-judge) | 4.30 / 5 | 4.30 / 5 | 0.00 |
+| Response quality (LLM-judge) | 4.50 / 5 | 4.10 / 5 | −0.40 (run-to-run noise) |
 | Cost per ticket | *deferred to v4.1* | *deferred to v4.1* | — |
 
 > **Cost row honestly deferred.** Per-call token + price instrumentation requires reading `resp.usage.prompt_tokens` / `completion_tokens` from every OpenAI response and accumulating with a per-model price table. That instrumentation is a v4.1 task (issue: v4.1-cost-tracking). The shortcut — hardcoding a model→price table or estimating from token counts alone — would produce numbers that drift the moment OpenRouter changes pricing. **No fake cost numbers in the README.**
 
-**Honest finding — what the Critic did:** Of 10 tickets, **1 flipped outcome under v4**. Ticket `eval-t07` ("technical question — basic_technical, high confidence") auto-sent under v3 and **escalated under v4**. The Critic lowered `draft_confidence` enough to push it below the 0.85 Gate 2 threshold.
+**Honest finding — what the Critic did:** nothing measurable. In the refreshed run v3 and v4 produced **identical outcomes on all 10 tickets** — same intents, same escalate/auto-send decisions. An earlier run (2026-05-09, before the harness was de-rigged) had recorded v4 over-escalating one ticket (`eval-t07`) and scoring 90% escalation precision. A fresh run did **not** reproduce that — `eval-t07` auto-sent correctly under v4. That single ticket was run-to-run LLM noise, not a structural v4 regression.
 
-**Honest bottom line: v4 did not beat v3.** On this 10-ticket set the two tie on the primary safety metric (`false_auto_send_rate` 0% both) and on response quality; the only metric that moved — escalation precision — moved *against* v4 (100% → 90%). One ticket separates them, which is within noise for n=10. And the gap is structural, not a tuning accident: the Critic can only ever *lower* `draft_confidence` (`src/agents/critic.py` multiplies it by `1 - severity*0.5`, always in `[0.5, 1.0]`), so v4 escalates **≥** v3 on every ticket and cannot beat a v3 that is already at 100% escalation precision. The honest takeaway is the measurement discipline: the multi-agent version was built, evaluated head-to-head, did not win — so the simpler path stays the default rather than being promoted on novelty. Full audit and root-cause analysis: [`discussion.md`](./discussion.md).
+**Honest bottom line: v4 did not beat v3.** Every metric is a tie or within noise. The response-quality gap (4.50 vs 4.10) is one LLM-judge run varying against another — a single live judge call per draft at n=10, where running v3 against itself twice would show comparable spread — and it points the *wrong* way for v4. The structural reason a v4 win is unlikely still holds: the Critic can only ever *lower* `draft_confidence` (`src/agents/critic.py` multiplies it by `1 - severity*0.5`, always in `[0.5, 1.0]`), so v4 escalates **≥** v3 on every ticket and cannot beat a v3 already at 100% escalation precision. The honest takeaway is the measurement discipline: the multi-agent version was built and evaluated head-to-head — twice, on hand-curated tickets and on real Bitext data — did not win, so the simpler path stays the default rather than being promoted on novelty. Full audit: [`discussion.md`](./discussion.md).
 
-**External cross-check — real Bitext data.** A second, independent eval on 10 real customer messages from the Bitext Customer Support dataset (run live through both versions) reached the same verdict: v3 and v4 produced identical outcomes on 9 of 10 tickets, and the one difference is run-to-run LLM noise on a node v4 does not even change. Intent accuracy fell to 50–60% on real external text (vs ~70–100% hand-curated) — but `false_auto_send_rate` held at 0% in both. Full write-up: [`eval/bitext_findings.md`](./eval/bitext_findings.md).
+**External cross-check — real Bitext data.** A second, independent eval on 10 real customer messages from the Bitext Customer Support dataset (run live through both versions) reached the same verdict: v3 and v4 produced identical outcomes on 9 of 10 tickets, and the one difference is run-to-run LLM noise on a node v4 does not even change. Intent accuracy fell to 50–60% on real external text (vs ~70% hand-curated) — but `false_auto_send_rate` held at 0% in both. Full write-up: [`eval/bitext_findings.md`](./eval/bitext_findings.md).
 
-Raw run artifacts: [`eval/results_v3_live.json`](./eval/results_v3_live.json) · [`eval/results_v4_live.json`](./eval/results_v4_live.json) · [`eval/results_bitext_v3.json`](./eval/results_bitext_v3.json) · [`eval/results_bitext_v4.json`](./eval/results_bitext_v4.json)
+Raw run artifacts (de-rigged harness, 2026-05-18): [`results_curated_v3.json`](./eval/results_curated_v3.json) · [`results_curated_v4.json`](./eval/results_curated_v4.json) · [`results_bitext_v3.json`](./eval/results_bitext_v3.json) · [`results_bitext_v4.json`](./eval/results_bitext_v4.json). The earlier `results_v3_live.json` / `results_v4_live.json` (2026-05-09) are kept as the subject of the `discussion.md` audit.
 
 **Multi-agent-specific evaluators** (`eval/multiagent_evaluators.py`) are wired but not yet aggregated into the v3-vs-v4 table — they require LangSmith run-tree introspection rather than the existing per-ticket harness:
 

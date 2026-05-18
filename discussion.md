@@ -74,6 +74,14 @@ Head-to-head, 10-ticket real-LLM eval (OpenRouter / DeepSeek V3):
 - Sample size is 10. One ticket *is* the entire v3-vs-v4 gap. That is within
   noise — no statistical conclusion can be drawn from it.
 
+> **[2026-05-18 update]** Confirmed. A refreshed run through the de-rigged
+> harness did **not** reproduce the `eval-t07` over-escalation — v4 tied v3 at
+> 100% escalation precision. The "v3 marginally ahead" reading in §0 was
+> within-noise, exactly as this bullet predicted. The structural argument in
+> §3.1 (the Critic can only lower confidence) still holds — it bounds v4 at
+> "ties or loses," and a tie is what both the refreshed curated run and the
+> real 10-ticket Bitext run (`eval/bitext_findings.md`) produced.
+
 **Plain-language conclusion:** the "newer, fancier" multi-agent v4 did **not**
 win. Best case it ties v3; on the one metric that moved, v3 won.
 

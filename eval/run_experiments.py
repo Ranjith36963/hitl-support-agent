@@ -1,27 +1,39 @@
-"""Eval harness entrypoint -- runs 10 hand-curated tickets through the full graph.
+"""Eval harness entrypoint -- runs an eval set through the full graph.
+
+Two eval sets (--dataset):
+    curated -- 10 hand-curated tickets, one per code path (eval/dataset.py)
+    bitext  -- 10 real Bitext tickets (eval/bitext_dataset.py); live-LLM only
 
 Usage:
-    python -m eval.run_experiments          # real LLM (requires OPENROUTER_API_KEY)
-    python -m eval.run_experiments --no-llm # deterministic canned classifications
+    python -m eval.run_experiments --dataset curated            # real LLM
+    python -m eval.run_experiments --dataset curated --no-llm   # canned, deterministic
+    python -m eval.run_experiments --dataset bitext --ticket-delay-sec 20
 
-Outputs:
-    eval/results.md   -- human-readable metrics table
-    eval/results.json -- machine-readable raw results
+Outputs (self-identifying — fixes the old hand-rename problem):
+    eval/results_{dataset}_{version}.md    -- human-readable metrics table
+    eval/results_{dataset}_{version}.json  -- machine-readable raw results
 
 Design:
     - Uses the full production graph (compile_full_with_checkpointer)
-    - Patches src.nodes._client with a fake MCPClientRouter (no Gmail/Slack needed)
-    - In --no-llm mode: also patches src.nodes.classify_intent and src.nodes.draft_response
-      with per-ticket canned results (deterministic, no LLM call)
-    - In real mode: uses the real LLM via OPENROUTER_API_KEY
-    - Handles multi-turn resume_sequence (T06 reject-then-redraft)
-    - false_auto_send_rate is the primary safety metric -- any non-zero value is a
-      blocking failure before shipping v3
+    - Patches the MCP client at BOTH call sites with a fake router: v3
+      (src.nodes._client) and v4 (src.agents.researcher._client) — no
+      Gmail/Slack needed
+    - KB retrieval through the fake router is REAL: it runs the production
+      search_kb() over data/acme_policies.md (no injected policy matches)
+    - In --no-llm mode: also patches src.nodes.classify_intent and
+      src.nodes.draft_response with per-ticket canned results (deterministic).
+      --no-llm is rejected for --dataset bitext (Bitext rows have no canned data)
+    - In real mode: uses the real LLM via OPENROUTER_API_KEY; 429s auto-retry
+      with a fresh checkpointer DB, --ticket-delay-sec paces tickets
+    - Handles multi-turn resume_sequence (curated T06 reject-then-redraft)
+    - false_auto_send_rate is the primary safety metric -- any non-zero value
+      is a blocking failure
 
-Patch points match tests/test_integration_smoke.py exactly:
-    patch("src.nodes.classify_intent", ...)
-    patch("src.nodes.draft_response", ...)
+Patch points (v3 + v4):
+    patch("src.nodes.classify_intent", ...)   # --no-llm only
+    patch("src.nodes.draft_response", ...)    # --no-llm only
     patch("src.nodes._client", lambda: fake_router)
+    patch("src.agents.researcher._client", lambda: fake_router)
 """
 
 from __future__ import annotations
