@@ -65,7 +65,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from langgraph.types import Command  # noqa: E402
 
-from eval.bitext_dataset import BITEXT_TICKETS  # noqa: E402
+from eval.bitext_dataset import BITEXT_TICKETS, BITEXT_TICKETS_27  # noqa: E402
 from eval.dataset import EVAL_TICKETS, EvalTicket  # noqa: E402
 from eval.evaluators import (  # noqa: E402
     EvalResult,
@@ -679,12 +679,14 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--dataset",
-        choices=["curated", "bitext"],
+        choices=["curated", "bitext", "bitext27"],
         default="curated",
         help=(
             "Which eval set to run. 'curated' = 10 hand-written tickets "
-            "(eval/dataset.py). 'bitext' = 10 real Bitext rows "
-            "(data/bitext_eval_10.csv) — live-LLM only."
+            "(eval/dataset.py). 'bitext' = 10 real Bitext rows, SaaS-mappable "
+            "intents (data/bitext_eval_10.csv). 'bitext27' = all 27 Bitext "
+            "intents, one ticket each (data/bitext_eval_27.csv). Both bitext "
+            "sets are live-LLM only."
         ),
     )
     parser.add_argument(
@@ -738,14 +740,15 @@ def main() -> None:
 
     version_label = "v4" if os.environ.get("MULTIAGENT_ENABLED") == "1" else "v3"
 
-    if args.dataset == "bitext":
+    if args.dataset in ("bitext", "bitext27"):
         if args.no_llm:
             print(
-                "ERROR: --dataset bitext requires live LLM. Bitext tickets carry "
-                "no canned data. Drop --no-llm and set OPENROUTER_API_KEY."
+                "ERROR: --dataset bitext/bitext27 requires live LLM. Bitext "
+                "tickets carry no canned data. Drop --no-llm and set "
+                "OPENROUTER_API_KEY."
             )
             sys.exit(1)
-        tickets = BITEXT_TICKETS
+        tickets = BITEXT_TICKETS if args.dataset == "bitext" else BITEXT_TICKETS_27
     else:
         tickets = EVAL_TICKETS
 
