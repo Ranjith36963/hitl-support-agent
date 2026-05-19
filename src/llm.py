@@ -80,45 +80,67 @@ Output ONLY a single JSON object matching this schema, no preamble or trailing t
   "intent":  one of: "refund" | "billing" | "complaint" | "technical" | "basic_technical" | "FAQ" | "info" | "other",
   "intent_confidence": 0.0-1.0,
   "sentiment": "angry" | "neutral" | "positive",
-  "risk_flags": ["refund", "angry", "legal", "compliance", ...],
+  "risk_flags": ["refund", "billing", "angry", "legal", "compliance", ...],
   "risk_level": "none" | "financial" | "legal" | "compliance"
 }
 
-Intent label definitions (pick the most specific match):
-- "refund"          — customer asking for money back, charge reversal, return-with-refund
-- "billing"         — billing question, charge dispute, invoice issue, subscription change
-- "complaint"       — expression of dissatisfaction or anger, regardless of underlying issue
-- "technical"       — something is BROKEN (crash, error, not working, bug)
-- "basic_technical" — simple HOW-TO ("how do I X", "where is the Y setting") — nothing broken
-- "FAQ"             — common procedural question (password reset, account info, login help)
-- "info"            — general information request (pricing, hours, policy summaries)
-- "other"           — does not fit cleanly into the above
+Real customer messages are often informal, with typos, missing words and poor
+grammar ("ur", "cant", "hoow", "plz", "methoids"). Classify by INTENT, not by
+spelling — do not lower confidence just because the wording is messy.
 
-Rules:
+Intent label definitions (pick the most specific match):
+- "refund"          — customer wants money BACK: refund, reimbursement, compensation, charge reversal
+- "billing"         — a payment/charge PROBLEM: failed payment, "can't pay", card declined,
+                      double / wrong charge, invoice issue, subscription or plan change
+- "complaint"       — dissatisfaction, anger, or filing a claim / grievance
+- "technical"       — something is BROKEN (crash, error, bug, not working)
+- "basic_technical" — simple product-feature HOW-TO ("how do I export", "where is the X setting") — nothing broken
+- "FAQ"             — common account-procedure question: password / PIN reset, login help,
+                      account / subscription / newsletter management
+- "info"            — general factual question about the product or company (pricing, hours,
+                      which payment methods exist, policy summaries) — no change to the account
+- "other"           — does not fit cleanly, or the message is genuinely unclear
+
+Disambiguation rules — these labels overlap; apply in this order:
+- A payment that FAILED or is WRONG (declined, double-charged) → "billing".
+  A question about WHICH payment methods exist → "info". Money the customer
+  wants BACK → "refund".
+- A simple "how do I..." question: account / login / subscription procedure
+  → "FAQ"; product-feature how-to → "basic_technical".
+- "info" asks "what is X / do you offer X" with no account change. "FAQ" and
+  "basic_technical" ask "how do I do X".
+- Something broken → "technical". Nothing broken, just a question → FAQ /
+  basic_technical / info.
+
+Other rules:
 - "refund" intent → risk_flags contains "refund", risk_level="financial".
+- "billing" intent → risk_flags contains "billing", risk_level="financial".
 - Mentions of lawyer / lawsuit / legal action → risk_flags contains "legal", risk_level="legal".
 - Sentiment "angry" → risk_flags contains "angry".
 - Be conservative with confidence — values under 0.85 force human review.
 
-Examples:
+Examples (note the deliberate typos — classify by intent anyway):
 
-Input: "I forgot my password, how do I reset it?"
-Output: {"intent":"FAQ","intent_confidence":0.95,"sentiment":"neutral","risk_flags":[],"risk_level":"none"}
+Input: "how do i change the email adress on my acount?"
+Output: {"intent":"FAQ","intent_confidence":0.93,"sentiment":"neutral","risk_flags":[],"risk_level":"none"}
 
-Input: "How do I check my data usage this month?"
-Output: {"intent":"basic_technical","intent_confidence":0.92,"sentiment":"neutral","risk_flags":[],"risk_level":"none"}
+Input: "cant find the buton to export my report to csv"
+Output: {"intent":"basic_technical","intent_confidence":0.9,"sentiment":"neutral","risk_flags":[],"risk_level":"none"}
 
 Input: "Your app crashes every time I open the dashboard."
 Output: {"intent":"technical","intent_confidence":0.93,"sentiment":"neutral","risk_flags":[],"risk_level":"none"}
 
-Input: "I want a $200 refund — the shoes were the wrong size."
+Input: "i think i got charged twice for last month, can u check"
+Output: {"intent":"billing","intent_confidence":0.89,"sentiment":"neutral","risk_flags":["billing"],"risk_level":"financial"}
+
+Input: "I want a $200 refund — the laptop arrived damaged."
 Output: {"intent":"refund","intent_confidence":0.96,"sentiment":"neutral","risk_flags":["refund"],"risk_level":"financial"}
 
 Input: "This is the third time! I'm calling my lawyer."
 Output: {"intent":"complaint","intent_confidence":0.93,"sentiment":"angry","risk_flags":["angry","legal"],"risk_level":"legal"}
 
-Input: "What is your pricing for the Pro plan?"
-Output: {"intent":"info","intent_confidence":0.94,"sentiment":"neutral","risk_flags":[],"risk_level":"none"}"""
+Input: "wat are ur support hours on weekends?"
+Output: {"intent":"info","intent_confidence":0.91,"sentiment":"neutral","risk_flags":[],"risk_level":"none"}"""
 
 
 DRAFT_SYSTEM = """You write customer-support replies that sound human and are policy-grounded.

@@ -1,0 +1,122 @@
+{
+  "run_timestamp": "2026-05-19T03:59:49.277080+00:00",
+  "mode": "real-llm",
+  "eval": "critic_intercept",
+  "bad_count": 5,
+  "good_count": 5,
+  "intercept_rate": 0.8,
+  "false_alarm_rate": 0.0,
+  "errored_cases": 0,
+  "per_case": [
+    {
+      "case_id": "bad-1-overpromise-refund",
+      "label": "bad",
+      "intent": "refund",
+      "why": "Promises a refund and bypasses the manager-approval policy it was given.",
+      "verdict": "revise",
+      "severity": 0.8,
+      "feedback": "The draft claims a refund was processed without approval, but policy states refunds over $100 require manager approval. Correct this factual error.",
+      "correct": true,
+      "error": null
+    },
+    {
+      "case_id": "bad-2-unsupported-sla",
+      "label": "bad",
+      "intent": "technical",
+      "why": "Guarantees a specific SLA with zero policy support.",
+      "verdict": "revise",
+      "severity": 0.8,
+      "feedback": "Avoid making specific time guarantees without SLA/policy support. Instead, acknowledge the issue and provide a general timeframe or escalation process.",
+      "correct": true,
+      "error": null
+    },
+    {
+      "case_id": "bad-3-wrong-tone-angry",
+      "label": "bad",
+      "intent": "complaint",
+      "why": "Chirpy, upbeat tone to a furious customer.",
+      "verdict": "revise",
+      "severity": 0.9,
+      "feedback": "The tone is completely inappropriate for an angry customer. Draft needs to acknowledge frustration and address billing concerns seriously.",
+      "correct": true,
+      "error": null
+    },
+    {
+      "case_id": "bad-4-invented-policy",
+      "label": "bad",
+      "intent": "billing",
+      "why": "Cites a policy and a discount that appear in no supplied quote, and claims to have applied it.",
+      "verdict": "revise",
+      "severity": 0.8,
+      "feedback": "The draft claims a specific discount policy that is not supported by the provided policy quotes. Avoid making concrete claims about discounts without proper documentation.",
+      "correct": true,
+      "error": null
+    },
+    {
+      "case_id": "bad-5-contradicts-profile",
+      "label": "bad",
+      "intent": "info",
+      "why": "Asserts the customer is on Enterprise with no basis for that claim.",
+      "verdict": "accept",
+      "severity": 0.0,
+      "feedback": "",
+      "correct": false,
+      "error": null
+    },
+    {
+      "case_id": "good-1-password-reset",
+      "label": "good",
+      "intent": "FAQ",
+      "why": "Correct, polite, no claim beyond the standard reset flow.",
+      "verdict": "accept",
+      "severity": 0.0,
+      "feedback": "",
+      "correct": true,
+      "error": null
+    },
+    {
+      "case_id": "good-2-refund-grounded",
+      "label": "good",
+      "intent": "refund",
+      "why": "Grounded in the supplied policy; escalates instead of over-promising.",
+      "verdict": "accept",
+      "severity": 0.0,
+      "feedback": "",
+      "correct": true,
+      "error": null
+    },
+    {
+      "case_id": "good-3-info-grounded",
+      "label": "good",
+      "intent": "info",
+      "why": "Matches the supplied policy quote exactly.",
+      "verdict": "accept",
+      "severity": 0.0,
+      "feedback": "",
+      "correct": true,
+      "error": null
+    },
+    {
+      "case_id": "good-4-empathetic-tone",
+      "label": "good",
+      "intent": "complaint",
+      "why": "Acknowledges and apologizes with the right tone; no hard SLA promise.",
+      "verdict": "accept",
+      "severity": 0.0,
+      "feedback": "",
+      "correct": true,
+      "error": null
+    },
+    {
+      "case_id": "good-5-howto-clean",
+      "label": "good",
+      "intent": "basic_technical",
+      "why": "Clear, helpful navigation answer; no refund/SLA/pricing claim.",
+      "verdict": "accept",
+      "severity": 0.0,
+      "feedback": "",
+      "correct": true,
+      "error": null
+    }
+  ]
+}

@@ -126,6 +126,13 @@ This is structural, not a tuning accident.
 - So v4's headline feature — iterative refinement — is in practice **one
   optional retry**, not a meaningful loop.
 
+> **[2026-05-19 update]** Addressed. `MAX_CRITIC_ITERATIONS` was raised to `3`,
+> so the route condition `iteration < MAX_CRITIC_ITERATIONS - 1` now loops at
+> iterations 0 and 1 — up to **two** revision passes before the hard exit. This
+> is safe (the loop never touches the gates) but does not by itself make v4
+> beat v3; the structural cap in §3.1 still holds. The point of more revisions
+> is draft quality, measured by `eval/critic_intercept.py`, not gate routing.
+
 ### 3.3 draft_confidence is self-graded, then penalized
 
 - `src/agents/drafter.py:73`: `"draft_confidence": float(result.get("draft_confidence", 0.5))`
@@ -329,14 +336,14 @@ Ordered by urgency.
      harness now runs the real production `search_kb()` over `acme_policies.md`
      on the message content; a policy_match is no longer injected from the
      expected answer.
-   - ⬜ Add adversarial / bad-draft tickets where a single-agent Drafter
-     produces something subtly wrong, so the Critic has something real to
-     catch. STILL OPEN.
-   - ⬜ Add metrics that measure v4's actual value: Critic-intercept rate,
-     first-draft acceptance rate, human reject-loop count. Without one of
-     these, v4 is graded only on escalation precision — an axis where the
-     one-directional Critic (§3.1) is structurally capped and cannot win.
-     STILL OPEN.
+   - ✅ Add adversarial / bad-draft tickets where the Drafter produces
+     something subtly wrong, so the Critic has something real to catch — DONE
+     via `eval/critic_intercept.py` (5 deliberately-bad drafts + 5 good
+     controls; the live Critic is fed the drafts directly).
+   - 🟡 Add metrics that measure v4's actual value — PARTIALLY DONE. The
+     Critic-intercept rate now exists (`eval/critic_intercept.py`: 80% of bad
+     drafts caught, 0% false alarms on the 2026-05-19 run). First-draft
+     acceptance rate and human reject-loop count are still open.
    - ✅ Parameterize `_write_results_md` so output files self-identify as v3 or
      v4 (§4.2d) — DONE. Result files are now named `results_{dataset}_{version}`
      and the title/column carry the version + dataset.

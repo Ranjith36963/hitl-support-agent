@@ -984,7 +984,7 @@ In addition to §19 sign-off criteria, v4 is "done" when:
 
 - All 3 agents (Researcher, Drafter, Critic) implemented as compiled LangGraph sub-graphs in `src/agents/`
 - Critic invariants test-asserted — 5 tests in `tests/test_critic_invariants.py` prove Critic cannot escalate, cannot bypass Gates 1+2, can only adjust `draft_confidence`
-- Drafter↔Critic loop hard cap of 2 iterations is test-asserted (test forces an infinite "revise" verdict and confirms exit)
+- Drafter↔Critic loop hard cap of 3 iterations is test-asserted (test forces an infinite "revise" verdict and confirms exit)
 - Live LLM eval run shows `false_auto_send_rate = 0%` in v4 on the 10-ticket curated set
 - v3 baseline preserved as comparison artifact (`eval/results_v3_live.json`) — flag flip restores v3 exactly
 

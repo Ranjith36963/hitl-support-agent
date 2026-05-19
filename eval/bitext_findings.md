@@ -3,6 +3,83 @@
 > Honest write-up of the first real external-benchmark eval. Run 2026-05-18,
 > live DeepSeek V3 via OpenRouter. Raw artifacts: `results_bitext_v3.{json,md}`,
 > `results_bitext_v4.{json,md}`.
+>
+> **See the [2026-05-19 update](#2026-05-19-update--prompt-fix--critic-intercept-eval)
+> below** — a classify-prompt fix, the first eval that actually credits v4, and
+> an honest blocker.
+
+---
+
+## 2026-05-19 update — prompt fix + Critic-intercept eval
+
+Three things happened after the original 2026-05-18 run.
+
+### 1. The Critic-intercept eval — the first eval that actually credits v4
+
+Every eval before this graded v4 on escalate-vs-auto-send — an axis where the
+one-directional Critic is structurally capped (see §3, and
+`docs/v4_multiagent.md`). `eval/critic_intercept.py` finally measures v4 on the
+axis it was *built* for: catching a flawed draft before a human sees it. It
+feeds the live Critic 5 deliberately-bad drafts and 5 good controls.
+
+| Metric | Result |
+|---|---|
+| Intercept rate (bad drafts caught) | **80%** — 4 of 5 |
+| False-alarm rate (good drafts wrongly flagged) | **0%** — 0 of 5 |
+
+The Critic caught the over-promised refund, the unsupported SLA guarantee, the
+wrong-tone-to-an-angry-customer reply, and the invented policy citation — and
+flagged none of the 5 good drafts. **For the first time in this repo, an eval
+measures v4 on the axis it was designed for, and v4 scores a real, non-trivial
+win there.** Raw artifact: `eval/results_critic_intercept.json`.
+
+The one miss (`bad-5`): a draft asserting "as one of our Enterprise customers
+you have priority support" was accepted. Honest reading — the test state did
+not supply a customer profile, so the Critic had no profile to contradict the
+claim against. This is "the Critic missed an unsupported customer-tier claim
+when no profile was in state," **not** "the Critic is weak on profile
+contradictions" — a more diagnostic re-test would pass a Free-tier profile in.
+
+### 2. The v3 classify prompt was improved — measurable gain
+
+The classifier prompt (`src/llm.py`, `CLASSIFY_SYSTEM`) was sharpened: clearer
+`FAQ`/`info`/`basic_technical` boundaries, a billing-vs-technical rule, and
+typo/messy-text robustness (examples chosen to NOT mirror the 10 Bitext test
+tickets — no overfitting). A clean v3 Bitext re-run:
+
+| Metric | v3 before (2026-05-18) | v3 after prompt fix (2026-05-19) |
+|---|---|---|
+| Intent accuracy | 50% | **70%** |
+| Escalation precision | 90% | **100%** |
+| False auto-send rate | 0% | 0% |
+
+A real, clean, measured improvement. `results_bitext_v3.json` now holds the
+post-fix run.
+
+### 3. Honest blocker — the matched v4 Bitext re-run did not complete
+
+The v4 Bitext re-run on the new prompt **failed**: 6 of 10 tickets errored with
+HTTP 402 ("requires more credits") — the OpenRouter account ran out of credit
+mid-run. Those numbers are discarded, not reported. `results_bitext_v4.json`
+was restored to the last clean run, which is **PRE** the prompt fix.
+
+Consequence: `results_bitext_v3.json` (post-fix) and `results_bitext_v4.json`
+(pre-fix) are **not a matched pair** right now. Both `.md` files carry a ⚠️
+banner saying so. A matched v4 re-run is pending an OpenRouter credit top-up.
+
+`classify_intent` is the same code in both versions and runs *before* the
+v3/v4 flag swap, so the prompt change exerts the **same effect** on v4 as on
+v3 — expected v4 intent accuracy after the fix is ~70% give or take run-to-run
+LLM variance. But that is reasoning from architecture, **not a measurement**.
+The matched run is still owed.
+
+Also shipped: `MAX_CRITIC_ITERATIONS` was raised 2 → 3 (up to 2 revision passes;
+`test_drafter_critic_loop.py` proves the cap holds at 3). It is unit-verified
+but **not yet observed on a live run** — the 402 blocked the v4 live run that
+would have shown the Critic using the extra pass. The loop *can* do 2 revisions;
+it has not yet been *seen* doing so in the wild.
+
+---
 
 ## What this is
 

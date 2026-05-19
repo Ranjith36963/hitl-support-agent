@@ -108,9 +108,9 @@ v3 ships a single-drafter HITL workflow. **v4 adds three specialized agents** wh
 |---|---|---|
 | **Researcher Agent** | `enrich_context_node` | Decides which MCP Read tools to call by intent (FAQ → KB only; refund → all 3) |
 | **Drafter Agent** | `draft_response_node` | Writes the reply; integrates Critic feedback on revision |
-| **Critic Agent** *(NEW)* | — | Audits draft against policy + tone; can request **one revision pass** before exit (loop cap `MAX_CRITIC_ITERATIONS = 2` → Drafter runs at most twice) |
+| **Critic Agent** *(NEW)* | — | Audits draft against policy + tone; can request **up to two revision passes** before exit (loop cap `MAX_CRITIC_ITERATIONS = 3` → Drafter runs at most 3×) |
 
-The outer graph is unchanged (still 15 nodes). Drafter and Critic run inside a bounded loop sub-graph (`MAX_CRITIC_ITERATIONS = 2`). See [`docs/v4_multiagent.md`](./docs/v4_multiagent.md) for the spec amendment.
+The outer graph is unchanged (still 15 nodes). Drafter and Critic run inside a bounded loop sub-graph (`MAX_CRITIC_ITERATIONS = 3`). See [`docs/v4_multiagent.md`](./docs/v4_multiagent.md) for the spec amendment.
 
 ### Hard invariants preserved (proven in code, not just docs)
 
@@ -147,9 +147,13 @@ _Refreshed 2026-05-18 through the de-rigged harness — real KB retrieval, no in
 
 **Honest bottom line: v4 did not beat v3.** Every metric is a tie or within noise. The response-quality gap (4.50 vs 4.10) is one LLM-judge run varying against another — a single live judge call per draft at n=10, where running v3 against itself twice would show comparable spread — and it points the *wrong* way for v4. The structural reason a v4 win is unlikely still holds: the Critic can only ever *lower* `draft_confidence` (`src/agents/critic.py` multiplies it by `1 - severity*0.5`, always in `[0.5, 1.0]`), so v4 escalates **≥** v3 on every ticket and cannot beat a v3 already at 100% escalation precision. The honest takeaway is the measurement discipline: the multi-agent version was built and evaluated head-to-head — twice, on hand-curated tickets and on real Bitext data — did not win, so the simpler path stays the default rather than being promoted on novelty. Full audit: [`discussion.md`](./discussion.md).
 
-**External cross-check — real Bitext data.** A second, independent eval on 10 real customer messages from the Bitext Customer Support dataset (run live through both versions) reached the same verdict: v3 and v4 produced identical outcomes on 9 of 10 tickets, and the one difference is run-to-run LLM noise on a node v4 does not even change. Intent accuracy fell to 50–60% on real external text (vs ~70% hand-curated) — but `false_auto_send_rate` held at 0% in both. Full write-up: [`eval/bitext_findings.md`](./eval/bitext_findings.md).
+**External cross-check — real Bitext data.** A second, independent eval on 10 real customer messages from the Bitext Customer Support dataset (run live through both versions) reached the same verdict: v3 and v4 produced identical outcomes on 9 of 10 tickets, and the one difference is run-to-run LLM noise on a node v4 does not even change. In that 2026-05-18 run intent accuracy fell to 50–60% on real external text (vs ~70% hand-curated) — but `false_auto_send_rate` held at 0% in both. Full write-up: [`eval/bitext_findings.md`](./eval/bitext_findings.md).
 
-Raw run artifacts (de-rigged harness, 2026-05-18): [`results_curated_v3.json`](./eval/results_curated_v3.json) · [`results_curated_v4.json`](./eval/results_curated_v4.json) · [`results_bitext_v3.json`](./eval/results_bitext_v3.json) · [`results_bitext_v4.json`](./eval/results_bitext_v4.json). The earlier `results_v3_live.json` / `results_v4_live.json` (2026-05-09) are kept as the subject of the `discussion.md` audit.
+**v4's first real win — the Critic-intercept eval (2026-05-19).** Every eval above grades escalate-vs-auto-send, an axis where v4's one-directional Critic is structurally capped. `eval/critic_intercept.py` finally measures v4 on its actual job — catching a flawed draft before a human sees it. Fed 5 deliberately-bad drafts and 5 good controls, the live Critic caught **4 of 5 bad drafts (80% intercept)** with **0 false alarms**. This is the first eval in the repo that credits the multi-agent layer on the axis it was built for. (One miss: an unsupported "you're an Enterprise customer" claim, accepted because no customer profile was supplied in the test state — see findings doc.)
+
+**Classifier improvement (2026-05-19).** The intent-classifier prompt was sharpened — clearer `FAQ`/`info`/`basic_technical` boundaries, a billing-vs-technical rule, typo robustness. A clean v3 Bitext re-run measured intent accuracy **50% → 70%** and escalation precision **90% → 100%**. The matched v4 re-run is **blocked on an OpenRouter credit top-up** — so `results_bitext_v3.json` (post-fix) and `results_bitext_v4.json` (pre-fix) are currently a mismatched pair; both files carry a ⚠️ banner. `classify_intent` is shared code that runs before the v3/v4 swap, so the same gain is expected for v4 — but that is reasoning, not yet a measurement.
+
+Raw run artifacts: [`results_curated_v3.json`](./eval/results_curated_v3.json) · [`results_curated_v4.json`](./eval/results_curated_v4.json) · [`results_bitext_v3.json`](./eval/results_bitext_v3.json) (post-prompt-fix) · [`results_bitext_v4.json`](./eval/results_bitext_v4.json) (pre-fix — re-run pending credits) · [`results_critic_intercept.json`](./eval/results_critic_intercept.json). The earlier `results_v3_live.json` / `results_v4_live.json` (2026-05-09) are kept as the subject of the `discussion.md` audit.
 
 **Multi-agent-specific evaluators** (`eval/multiagent_evaluators.py`) are wired but not yet aggregated into the v3-vs-v4 table — they require LangSmith run-tree introspection rather than the existing per-ticket harness:
 
@@ -173,7 +177,7 @@ Compares `tool_selection_precision` (does the cheaper model still pick the right
 ### Engineering choices documented honestly
 
 - **Researcher milestone-1 is deterministic, not full ReAct.** Same trace narrative at 1/3 the cost and zero risk of agent loops. Full ReAct upgrade is v4.1 follow-up — see comment block in `src/agents/researcher.py`.
-- **Critic loop hard cap is 2 iterations.** Test-asserted in `test_drafter_critic_loop.py`. Even when the Critic returns "revise" forever, the loop exits.
+- **Critic loop hard cap is 3 iterations** (up to 2 revision passes). Test-asserted in `test_drafter_critic_loop.py`. Even when the Critic returns "revise" forever, the loop exits.
 - **No new LLM dependency.** v4 uses the same SDK as v3 (`openai.AsyncOpenAI`) but through its own factory (`src/agents/base.get_llm()`), not by importing v3's client. Same library, parallel module — one OpenRouter integration class to debug, but the v4 agents do not have a runtime dependency on `src.nodes`. Module dependency arrow is v3→shared and v4→shared, never v4→v3.
 
 See [`demo/v4_critic_intercept.md`](./demo/v4_critic_intercept.md) for the agent-to-agent self-correction demo script.
@@ -195,7 +199,7 @@ See [`demo/v4_critic_intercept.md`](./demo/v4_critic_intercept.md) for the agent
 | **`test_agents_base.py`** | **5** | **v4: handoff metadata schema, prompt loader, AsyncOpenAI factory** |
 | **`test_researcher_agent.py`** | **3** | **v4: intent → tool selection (FAQ skips history; refund calls all 3)** |
 | **`test_critic_invariants.py`** | **6** | **v4: Critic CANNOT bypass gates / set send / mutate audit log; severity clamped to [0,1]** |
-| **`test_drafter_critic_loop.py`** | **3** | **v4: loop cap = 2 iterations (one revision pass) even on infinite "revise"; respects accept verdict** |
+| **`test_drafter_critic_loop.py`** | **3** | **v4: loop cap = 3 iterations (up to two revision passes) even on infinite "revise"; respects accept verdict** |
 | **`test_v4_integration.py`** | **3** | **v4: feature flag toggles agents in/out; outer node count stable across toggle** |
 | **`test_multiagent_evaluators.py`** | **8** | **v4: 5 evaluators handle empty/typical/mismatch inputs** |
 

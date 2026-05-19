@@ -6,7 +6,7 @@ Replaces draft_response_node when MULTIAGENT_ENABLED=1. Internally:
 3. If Critic verdict == "revise" AND iteration < MAX → loop to step 1
 4. Else → exit, parent graph proceeds to gates
 
-Hard cap: MAX_CRITIC_ITERATIONS=2. Always exits.
+Hard cap: MAX_CRITIC_ITERATIONS=3 (up to 2 revision passes). Always exits.
 
 Output shape matches v3 draft_response_node so downstream nodes are unchanged:
   original_draft, final_draft, draft_confidence, audit_log.
@@ -25,7 +25,12 @@ from src.agents.base import build_handoff_metadata, get_llm, get_model_id, load_
 from src.agents.critic import critic_node
 from src.state import AgentState
 
-MAX_CRITIC_ITERATIONS = 2
+# Loop cap. The route condition is `iteration < MAX_CRITIC_ITERATIONS - 1`,
+# so 3 lets the Critic loop at iterations 0 and 1 → at most 3 drafts / 2
+# revision passes, then a hard exit. Keep this small: every extra iteration is
+# another Drafter + Critic LLM round-trip. Do NOT raise it without re-sizing
+# the bound check in tests/test_drafter_critic_loop.py.
+MAX_CRITIC_ITERATIONS = 3
 _DRAFTER_PROMPT = load_prompt("drafter_system")
 
 

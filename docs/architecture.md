@@ -483,11 +483,11 @@ Extends the v3 "How this maps to the codebase" table above. v4 agents share infr
 |---|---|
 | Shared agent infra — `get_llm()` (AsyncOpenAI to OpenRouter, same SDK as v3), `get_model_id(override_env)`, `load_prompt()`, `build_handoff_metadata()`, `get_client()` (delegates to `graph_runner.get_mcp_router`) | `src/agents/base.py` |
 | Researcher sub-graph — single-node compiled sub-graph; deterministic intent → MCP Read tool selection (full ReAct deferred to v4.1) | `src/agents/researcher.py` |
-| Drafter sub-graph — `drafter ⇄ critic` loop with `MAX_CRITIC_ITERATIONS = 2` hard cap; output shape preserves v3 contract (`original_draft`, `final_draft`, `draft_confidence`) | `src/agents/drafter.py` |
+| Drafter sub-graph — `drafter ⇄ critic` loop with `MAX_CRITIC_ITERATIONS = 3` hard cap; output shape preserves v3 contract (`original_draft`, `final_draft`, `draft_confidence`) | `src/agents/drafter.py` |
 | Critic agent — LLM judge with escalate-on-uncertainty fallback (malformed JSON → `verdict=revise`, `severity=0.5`); writes only allow-listed fields; severity clamped to `[0, 1]` | `src/agents/critic.py` |
 | System prompts (markdown, version-controlled) | `data/prompts/researcher_system.md` · `data/prompts/drafter_system.md` · `data/prompts/critic_system.md` |
 | Critic safety contract — 6 tests prove allow-list, severity clamp, monotonic confidence decrease, malformed-JSON fallback | `tests/test_critic_invariants.py` |
-| Drafter↔Critic loop hard cap — 3 tests prove the loop terminates at 2 iterations even when the Critic returns `revise` indefinitely | `tests/test_drafter_critic_loop.py` |
+| Drafter↔Critic loop hard cap — 3 tests prove the loop terminates at 3 iterations even when the Critic returns `revise` indefinitely | `tests/test_drafter_critic_loop.py` |
 | End-to-end smoke — 3 tests covering FAQ auto-send path, revise-then-accept loop, and Critic-triggered escalate path | `tests/test_v4_integration_smoke.py` |
 | 5 v4 evaluators — tool selection precision, critic disagreement rate, alignment with human edits, loop iteration distribution, per-agent cost breakdown | `eval/multiagent_evaluators.py` |
 | A/B Researcher-model swap experiment runner (DeepSeek vs Haiku-tier) | `eval/ab_model_swap.py` |

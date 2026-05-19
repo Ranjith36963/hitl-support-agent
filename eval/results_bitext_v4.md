@@ -1,5 +1,9 @@
 # HITL Agent Eval Results — v4 (bitext dataset)
 
+> ⚠️ NOT a matched pair with `results_bitext_v3.md`. This v4 run is PRE the
+> 2026-05-19 classify-prompt-fix; the v3 file is POST-fix. A matched v4 re-run
+> is blocked on OpenRouter credits (HTTP 402). See `eval/bitext_findings.md`.
+
 _Generated: 2026-05-18T21:04:50.623697+00:00_
 
 **Mode: real LLM (OpenRouter / DeepSeek V3)**

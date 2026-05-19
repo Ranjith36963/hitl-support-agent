@@ -13,7 +13,7 @@ Three reasoning-heavy nodes from v3 become specialized agents coordinated by the
 | v3 node | v4 replacement | What it gains |
 |---|---|---|
 | `enrich_context_node` | **Researcher Agent** (compiled sub-graph) | Decides which of the 3 MCP Read tools to call, in what order, when to stop. ReAct loop. |
-| `draft_response_node` | **Drafter Agent + Critic Agent** (sub-graph with internal loop, max 2 iterations) | Self-critique against policy / tone / factuality before handoff to deterministic gates. |
+| `draft_response_node` | **Drafter Agent + Critic Agent** (sub-graph with internal loop, max 3 iterations) | Self-critique against policy / tone / factuality before handoff to deterministic gates. |
 
 Total agents: **3** (Researcher, Drafter, Critic). All compiled sub-graphs, all slot into existing parent-graph node positions.
 
@@ -34,6 +34,37 @@ These are the discriminating constraints. Any future change to v4 must preserve 
 | `thread_id == ticket_id` | LangGraph thread stability for resume after restart |
 
 **Critic agent is wired as input to `draft_confidence`, NOT as a replacement for Gates 1+2.** Single-line spec: *"Critic verdict adjusts `draft_confidence`; Gate 1 and Gate 2 thresholds remain hard-coded in `src/policy.py`."*
+
+### Why the Critic is ONE-DIRECTIONAL — rejected proposal on record
+
+`src/agents/critic.py` computes `draft_confidence *= (1 - severity * 0.5)`,
+with `severity ∈ [0, 1]`, so the multiplier is always in `[0.5, 1.0]`. The
+Critic can only **lower** `draft_confidence`, never raise it. This is
+deliberate. Do not "fix" it.
+
+**Rejected proposal (2026-05-19):** *"Make the Critic two-directional so it can
+also raise `draft_confidence` — then v4 could beat v3."* Proposed and rejected
+the same day. It must not be re-implemented. The reasons, on the record:
+
+- **It is unsafe.** Gate 2 (`gate_two_confidence` in `src/policy.py`) escalates
+  to a human whenever `draft_confidence < 0.85`. If the Critic could *raise*
+  `draft_confidence`, a draft the Drafter self-graded at e.g. 0.80 (correctly
+  headed for human review) could be pushed to 0.90 — and if Gate 1 passes and
+  the intent is auto-send-safe, that ticket **auto-sends with no human**. The
+  deterministic safety gate would become contingent on a second LLM agreeing
+  with the first. That is a direct false-auto-send pathway, and
+  `false_auto_send_rate = 0%` is the non-negotiable primary safety metric.
+- **It is also pointless.** In every eval to date (curated + Bitext) v3 has
+  never over-escalated — escalation precision sits at/near 100%. There are no
+  incorrect v3 escalations for a "raise confidence" Critic to reverse. Measured
+  upside: zero.
+
+Zero measured benefit, a real new safety hole. The Critic stays one-directional.
+
+**The honest way to make v4 valuable** is not gate routing — it is draft
+quality: the Critic catches a flawed draft and makes the Drafter rewrite it
+before any human or customer sees it. Measure *that* (Critic-intercept rate —
+see `eval/critic_intercept.py`); never weaken the gate.
 
 ## Architecture
 
@@ -67,7 +98,7 @@ Email → pii_redact → classify_intent → [Researcher Agent] → [Drafter Age
 - If `verdict == revise` AND iteration < 2 → loop back to Drafter with feedback in prompt.
 - Else → exit sub-graph with final draft.
 - Critic severity → `draft_confidence` adjustment: `draft_confidence *= (1 - severity * 0.5)`.
-- **Hard cap: 2 iterations.** No infinite loops.
+- **Hard cap: 3 iterations** (up to 2 revision passes). No infinite loops.
 
 ## LangSmith observability — handoff metadata schema
 

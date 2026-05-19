@@ -78,6 +78,11 @@ async def critic_node(state: AgentState) -> dict[str, Any]:
 
     severity = float(verdict.get("severity", 0.0))
     severity = max(0.0, min(1.0, severity))  # clamp to [0,1]
+    # ONE-DIRECTIONAL BY DESIGN — multiplier (1 - severity*0.5) is in [0.5, 1.0],
+    # so this can only LOWER draft_confidence. Do NOT make it able to raise it:
+    # that would let the Critic LLM push a draft past Gate 2's 0.85 threshold
+    # into auto-send, breaking false_auto_send_rate = 0%. Full rationale +
+    # rejected proposal: docs/v4_multiagent.md "Why the Critic is ONE-DIRECTIONAL".
     new_confidence = state.get("draft_confidence", 1.0) * (1 - severity * 0.5)
 
     audit_entry = {

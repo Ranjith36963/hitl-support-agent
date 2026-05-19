@@ -1,32 +1,24 @@
 {
-  "run_timestamp": "2026-05-18T20:54:35.158027+00:00",
+  "run_timestamp": "2026-05-19T04:05:52.016179+00:00",
   "mode": "real-llm",
   "dataset": "bitext",
   "version": "v3",
   "ticket_count": 10,
-  "intent_accuracy": 0.5,
-  "escalation_precision": 0.9,
+  "intent_accuracy": 0.7,
+  "escalation_precision": 1.0,
   "false_auto_send_rate": 0.0,
   "false_auto_send_safety_pass": true,
-  "response_quality_avg": 4.5,
+  "response_quality_avg": 4.3,
   "escalation_details": {
-    "precision": 0.9,
-    "correct": 9,
+    "precision": 1.0,
+    "correct": 10,
     "total": 10,
-    "mismatches": [
-      {
-        "ticket_id": "bitext-t04",
-        "description": "Bitext:create_account -> basic_technical (how to create an account \u2014 basic how-to)",
-        "expected": "auto_send",
-        "actual": "escalated",
-        "actual_channel": "#support-technical"
-      }
-    ]
+    "mismatches": []
   },
   "false_auto_send_details": {
     "rate": 0.0,
     "false_auto_sends": [],
-    "auto_send_count": 3,
+    "auto_send_count": 4,
     "safety_pass": true
   },
   "failure_slice": {
@@ -37,9 +29,9 @@
         "accuracy": 1.0
       },
       "basic_technical": {
-        "correct": 0,
+        "correct": 1,
         "total": 1,
-        "accuracy": 0.0
+        "accuracy": 1.0
       },
       "refund": {
         "correct": 3,
@@ -69,65 +61,65 @@
         "accuracy": 0.0
       },
       "no_flags": {
-        "correct": 9,
+        "correct": 10,
         "total": 10,
-        "accuracy": 0.9
+        "accuracy": 1.0
       }
     },
     "false_auto_sends_by_intent": {}
   },
   "response_quality_details": {
-    "avg_score": 4.5,
+    "avg_score": 4.3,
     "per_ticket": [
       {
         "ticket_id": "bitext-t01",
         "score": 5,
-        "reason": "Directly answers the question with clear instructions, maintains a warm tone, and offers additional support if needed."
+        "reason": "Directly answers the question with clear, concise instructions and a warm tone."
       },
       {
         "ticket_id": "bitext-t02",
         "score": 5,
-        "reason": "The response directly addresses the request, provides clear instructions, and maintains a warm and helpful tone."
+        "reason": "Directly addresses the request, confirms action taken, and maintains a warm, helpful tone."
       },
       {
         "ticket_id": "bitext-t03",
         "score": 5,
-        "reason": "Directly answers the question with clear information, maintains a warm tone, and offers further assistance."
+        "reason": "Directly answers the question with a warm tone and offers additional assistance if needed."
       },
       {
         "ticket_id": "bitext-t04",
         "score": 4,
-        "reason": "The response is warm and directly addresses the issue but could have included more proactive guidance or troubleshooting steps."
+        "reason": "The response is friendly and seeks clarification, but it could have included a direct troubleshooting step or link to account creation."
       },
       {
         "ticket_id": "bitext-t05",
-        "score": 5,
-        "reason": "The response directly addresses the refund request with clear policy reference, maintains a warm tone, and offers further assistance."
+        "score": 3,
+        "reason": "The response addresses the refund request but is vague about compensation and lacks warmth."
       },
       {
         "ticket_id": "bitext-t06",
-        "score": 4,
-        "reason": "Directly answers the question with a warm tone but could be more concise and provide a direct link or clearer guidance."
+        "score": 5,
+        "reason": "Directly answers the question with clear instructions and a warm, helpful tone."
       },
       {
         "ticket_id": "bitext-t07",
         "score": 4,
-        "reason": "The response directly answers the question with a warm tone but could have been more concise."
+        "reason": "The response directly addresses the query with a polite tone but could be more concise."
       },
       {
         "ticket_id": "bitext-t08",
         "score": 4,
-        "reason": "The response is helpful and warm but slightly misses directly answering where to notify of an error."
+        "reason": "The response directly addresses the issue with a warm tone but could have provided clearer instructions on where to notify the error."
       },
       {
         "ticket_id": "bitext-t09",
         "score": 4,
-        "reason": "The response directly addresses the request with a warm tone and clear instructions, but could be more specific about non-cancellation claims."
+        "reason": "The response directly addresses the request and provides clear instructions, but could be slightly warmer in tone."
       },
       {
         "ticket_id": "bitext-t10",
-        "score": 5,
-        "reason": "Directly addresses the request with a warm tone and clear action to connect with a human agent."
+        "score": 4,
+        "reason": "The response is helpful and offers to connect with a live agent, but it could directly confirm the request for a human agent instead of asking for more details first."
       }
     ],
     "llm_available": true
@@ -153,8 +145,8 @@
       "ticket_id": "bitext-t02",
       "description": "Bitext:newsletter_subscription -> FAQ (newsletter signup \u2014 safe FAQ)",
       "expected_intent": "FAQ",
-      "actual_intent": "basic_technical",
-      "intent_match": false,
+      "actual_intent": "FAQ",
+      "intent_match": true,
       "expected_outcome": "auto_send",
       "actual_outcome": "auto_send",
       "outcome_match": true,
@@ -185,13 +177,13 @@
       "ticket_id": "bitext-t04",
       "description": "Bitext:create_account -> basic_technical (how to create an account \u2014 basic how-to)",
       "expected_intent": "basic_technical",
-      "actual_intent": "technical",
+      "actual_intent": "FAQ",
       "intent_match": false,
       "expected_outcome": "auto_send",
-      "actual_outcome": "escalated",
-      "outcome_match": false,
+      "actual_outcome": "auto_send",
+      "outcome_match": true,
       "expected_channel": "",
-      "actual_channel": "#support-technical",
+      "actual_channel": "",
       "actual_risk_flags": [],
       "final_state": "sent",
       "human_rejection_count": 0,
@@ -257,14 +249,16 @@
       "ticket_id": "bitext-t08",
       "description": "Bitext:payment_issue -> billing (payment problem \u2014 billing dispute escalates)",
       "expected_intent": "billing",
-      "actual_intent": "technical",
-      "intent_match": false,
+      "actual_intent": "billing",
+      "intent_match": true,
       "expected_outcome": "escalated",
       "actual_outcome": "escalated",
       "outcome_match": true,
       "expected_channel": "#support-technical",
       "actual_channel": "#support-technical",
-      "actual_risk_flags": [],
+      "actual_risk_flags": [
+        "billing"
+      ],
       "final_state": "sent",
       "human_rejection_count": 0,
       "error": null
