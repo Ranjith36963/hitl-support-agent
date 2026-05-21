@@ -24,12 +24,18 @@ PROMPT_DIR = Path(__file__).parent.parent.parent / "data" / "prompts"
 
 
 def get_llm(model: str | None = None) -> AsyncOpenAI:
-    """Return an AsyncOpenAI client pointed at OpenRouter.
+    """Return an AsyncOpenAI client.
+
+    Provider switch (LLM_PROVIDER):
+      - "openai"    -> OpenAI direct (uses OPENAI_API_KEY)
+      - anything else -> OpenRouter (default; uses OPENROUTER_API_KEY)
 
     Lazy + per-call so A/B model swap experiments can override the model
     without touching a module-level singleton. Pass `model` to override
     the default for one call site (e.g., RESEARCHER_MODEL_OVERRIDE).
     """
+    if os.environ.get("LLM_PROVIDER", "").lower() == "openai":
+        return AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
     return AsyncOpenAI(
         api_key=os.environ.get("OPENROUTER_API_KEY", ""),
         base_url=os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
@@ -39,7 +45,8 @@ def get_llm(model: str | None = None) -> AsyncOpenAI:
 def get_model_id(override_env: str | None = None) -> str:
     """Resolve the model id, honoring an optional per-agent override env var.
 
-    Order: explicit override env -> OPENROUTER_MODEL -> default deepseek.
+    Order: explicit override env -> provider default (OPENAI_MODEL when
+    LLM_PROVIDER=openai, otherwise OPENROUTER_MODEL) -> hardcoded fallback.
     Lets the A/B model swap runner set RESEARCHER_MODEL_OVERRIDE without
     leaking into the Drafter/Critic.
     """
@@ -47,6 +54,8 @@ def get_model_id(override_env: str | None = None) -> str:
         override = os.environ.get(override_env)
         if override:
             return override
+    if os.environ.get("LLM_PROVIDER", "").lower() == "openai":
+        return os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
     return os.environ.get("OPENROUTER_MODEL", "deepseek/deepseek-chat")
 
 

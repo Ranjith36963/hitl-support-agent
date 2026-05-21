@@ -7,6 +7,12 @@
 > **See the [2026-05-19 update](#2026-05-19-update--prompt-fix--critic-intercept-eval)
 > below** — a classify-prompt fix, the first eval that actually credits v4, and
 > an honest blocker.
+>
+> **2026-05-21 — full 27-intent breadth eval is now in
+> [`bitext27_findings.md`](./bitext27_findings.md)** (live OpenAI `gpt-4o-mini`).
+> Both versions **fail the primary safety metric** on the breadth set; v4 caught
+> 5 of v3's 6 dangerous false auto-sends but introduced over-corrections. Read
+> the new file for the headline matrix, root-cause split, and next steps.
 
 ---
 

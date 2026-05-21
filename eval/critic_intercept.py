@@ -198,8 +198,12 @@ async def _judge_case(case: CriticCase, rate_limit_retries: int = 3) -> dict[str
 
 async def _run(ticket_delay_sec: float = 15.0) -> None:
     """Run all Critic cases, score intercept + false-alarm, write results."""
-    if not os.environ.get("OPENROUTER_API_KEY", ""):
-        print("ERROR: OPENROUTER_API_KEY not set. This is a live-LLM eval. No fake metrics.")
+    if os.environ.get("LLM_PROVIDER", "").lower() == "openai":
+        key_name, key_val = "OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY", "")
+    else:
+        key_name, key_val = "OPENROUTER_API_KEY", os.environ.get("OPENROUTER_API_KEY", "")
+    if not key_val:
+        print(f"ERROR: {key_name} not set. This is a live-LLM eval. No fake metrics.")
         sys.exit(1)
 
     print(f"[critic-intercept] {len(CRITIC_CASES)} cases — live Critic\n")

@@ -29,12 +29,18 @@ from pydantic import BaseModel, Field
 
 
 def _client() -> AsyncOpenAI:
-    """Build an OpenAI-shaped client pointed at OpenRouter.
+    """Build an OpenAI-shaped client.
+
+    Provider switch (LLM_PROVIDER):
+      - "openai"    -> OpenAI direct (uses OPENAI_API_KEY, default base_url)
+      - anything else -> OpenRouter (default; uses OPENROUTER_API_KEY)
 
     Lazy-constructed so importing this module doesn't fail when env vars are
     not set yet (matters for tests and for module-level imports during
     sub-agent work before secrets are provisioned).
     """
+    if os.environ.get("LLM_PROVIDER", "").lower() == "openai":
+        return AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
     return AsyncOpenAI(
         api_key=os.environ.get("OPENROUTER_API_KEY", ""),
         base_url=os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
@@ -42,6 +48,8 @@ def _client() -> AsyncOpenAI:
 
 
 def _model() -> str:
+    if os.environ.get("LLM_PROVIDER", "").lower() == "openai":
+        return os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
     return os.environ.get("OPENROUTER_MODEL", "deepseek/deepseek-chat")
 
 

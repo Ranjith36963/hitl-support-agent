@@ -382,10 +382,16 @@ async def _run_all(
         print()
 
     if not no_llm:
-        api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        if os.environ.get("LLM_PROVIDER", "").lower() == "openai":
+            api_key = os.environ.get("OPENAI_API_KEY", "")
+            key_name = "OPENAI_API_KEY"
+        else:
+            api_key = os.environ.get("OPENROUTER_API_KEY", "")
+            key_name = "OPENROUTER_API_KEY"
         if not api_key:
             print(
-                "ERROR: OPENROUTER_API_KEY is not set.\n"
+                f"ERROR: {key_name} is not set (LLM_PROVIDER="
+                f"{os.environ.get('LLM_PROVIDER', 'openrouter')}).\n"
                 "Set the env var and retry, or use --no-llm for deterministic mode.\n"
                 "No fake metrics will be produced."
             )
