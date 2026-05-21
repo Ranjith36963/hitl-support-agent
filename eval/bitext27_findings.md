@@ -8,7 +8,8 @@
 ## TL;DR (read this first)
 
 - **Both versions fail the primary safety metric** (`false_auto_send_rate > 0`) on the 27-intent breadth set. **Neither is shippable as-is.**
-- v4 caught **5 of v3's 6 dangerous false auto-sends** but introduced **7 conservative misfires** (expected auto-send → actually escalated). Safety-throughput trade is real and asymmetric.
+- **But the headline rate is misleading on its own.** v3 produced **6 dangerous false auto-sends** out of 11 auto-sends (54.5%); v4 produced **1 out of 2** (50%). The rate is similar but the absolute count fell **6 → 1** — v4 is meaningfully safer in practice, not "as broken as v3." The rate is just noisy at a tiny denominator.
+- v4 escalated **5 of v3's 6 dangerous false auto-sends** but introduced **7 conservative misfires** (expected auto-send → actually escalated). Safety-throughput trade is real and asymmetric.
 - The one false auto-send v4 *still* misses (`t08 — registration_problems`) is a **classifier failure**, not a drafter failure. The Critic operates on (draft, customer_message) — it cannot see that the *intent label* is wrong. This is the architectural ceiling of the current v4 design.
 - Intent accuracy is **identical** (55.6% v3 vs 55.6% v4) because classify is the shared first node. Improvements to the classifier itself would move both versions; the multi-agent layer adds nothing here.
 
@@ -18,6 +19,8 @@
 - **Bitext is e-commerce / order-support.** Roughly 10 of the 27 intents map cleanly to a SaaS agent; the remaining ~9 (cancel_order, change_order, place_order, track_order, delivery_*, change_shipping_address, set_up_shipping_address, etc.) are out-of-domain and tagged `[e-commerce]` in `data/bitext_eval_27.csv`.
 - **Expected outcomes are hand-mapped judgement calls.** A reasonable senior reviewer might re-label some rows (e.g., "should `delivery_period` auto-send a polite 'we don't ship physical goods'?"). See "Debatable labels" section below.
 - **Provider shift.** All historical eval JSONs (`results_curated_*`, `results_bitext_*`, `results_v3/v4_live`) ran on **DeepSeek V3 via OpenRouter paid**. This run uses **OpenAI gpt-4o-mini**. New baseline labeled accordingly. Earlier numbers stay in repo as historical, properly tagged.
+- **Curated equivalence check.** Before launching the 27-intent run, the same v3 graph was re-run against the in-domain 10-ticket curated set on `gpt-4o-mini` and produced identical headline metrics to the DeepSeek V3 baseline (intent 70%, escalation 100%, false_auto_send 0%, response_quality 4.40/5 vs 4.50/5). Artifact: [`results_curated_v3_gpt4omini.json`](./results_curated_v3_gpt4omini.json). This rules out provider-quality drift as a confound for the breadth-set numbers below.
+- **LLM-as-judge runs on the same provider+model as the drafter** (`gpt-4o-mini` judging `gpt-4o-mini`). Same-family self-evaluation has a known bias and applied equally to the prior DeepSeek V3 baselines (DeepSeek judging DeepSeek). Treat `response_quality_avg` as a sanity signal, not an independent rating.
 - **Cost of this run:** roughly $0.05 of existing OpenAI credits, completed in ~10 minutes.
 
 ## Headline matrix
@@ -46,7 +49,7 @@ These 5 tickets are v3 dangerous false auto-sends that **v4 escalated correctly*
 | t23 | `track_order` | "checking order status" | ❌ auto_send | ✅ escalated |
 | t26 | `change_shipping_address` | "give me information about a deliver[y]" | ❌ auto_send | ✅ escalated |
 
-**Mechanism:** v3's classifier confidently mislabels these as `info` or `FAQ` (intent_confidence > 0.85), so Gate 2 passes → auto-send. In v4, the Drafter writes a reply, then the Critic compares the draft against the customer message. When the draft does not address the actual question well (invoice #37777 → drafter writes generic "check account settings"; track_order → drafter writes off-domain placeholder), the Critic lowers `draft_confidence` (one-directional invariant — can only lower) below 0.85, which **flips Gate 2 to escalate**. Working as designed.
+**Plausible mechanism — not yet directly measured.** v3's classifier confidently mislabels these as `info` or `FAQ` (intent_confidence > 0.85), so Gate 2 passes → auto-send. In v4, the Drafter writes a reply, the Researcher pre-fetches policy/customer context, and the Critic reviews the draft. The escalations are most plausibly driven by the Drafter↔Critic loop lowering `draft_confidence` below Gate 2's 0.85 threshold (the Critic invariant is one-directional — can only lower), but this run did **not** capture per-ticket Critic verdicts or per-iteration `draft_confidence` traces. A follow-up that surfaces that telemetry (LangSmith trace IDs or per-ticket audit_log dump) would confirm whether the Critic alone, the Researcher-driven draft, or both account for each catch.
 
 ## The 1 false auto-send that v4 *still* misses
 
@@ -60,19 +63,21 @@ These 5 tickets are v3 dangerous false auto-sends that **v4 escalated correctly*
 
 ## The 7 v4 over-corrections — the cost of v4's conservatism
 
-These are tickets where v3 correctly auto-sent (expected = auto_send) but v4 escalated:
+These are tickets where the expected outcome was `auto_send` but v4 escalated. Splitting them by whether v4 *introduced* the regression or just inherited it from a v3 classifier miss:
 
-| Ticket | Bitext intent | v3 outcome | v4 outcome | Severity |
+| Ticket | Bitext intent | v3 outcome | v4 outcome | Source |
 |---|---|---|---|---|
-| t01 | `recover_password` | ✅ auto_send | ⚠️ escalated | Real cost — paged a human for a password reset |
-| t02 | `newsletter_subscription` | ✅ auto_send | ⚠️ escalated | Real cost — paged a human for newsletter mgmt |
-| t03 | `check_payment_methods` | ✅ auto_send | ⚠️ escalated | Real cost — paged a human for a stock answer |
-| t04 | `create_account` | ⚠️ escalated (in v3 too — classifier said `technical`) | ⚠️ escalated | shared classifier miss |
-| t06 | `switch_account` | ⚠️ escalated (in v3 too — classifier said `other`) | ⚠️ escalated | shared classifier miss |
-| t24 | `delivery_options` (e-commerce) | ✅ auto_send | ⚠️ escalated | Debatable — out-of-domain ticket |
-| t25 | `delivery_period` (e-commerce) | ✅ auto_send | ✅ auto_send | not a v4 regression here |
+| t01 | `recover_password` | ✅ auto_send | ⚠️ escalated | **NEW in v4** — Critic flagged a simple FAQ draft |
+| t02 | `newsletter_subscription` | ✅ auto_send | ⚠️ escalated | **NEW in v4** — same pattern |
+| t03 | `check_payment_methods` | ✅ auto_send | ⚠️ escalated | **NEW in v4** — same pattern |
+| t04 | `create_account` | ⚠️ escalated | ⚠️ escalated | **v3 carryover** — classifier said `technical`, both versions escalated |
+| t06 | `switch_account` | ⚠️ escalated | ⚠️ escalated | **v3 carryover** — classifier said `other`, both versions escalated |
+| t24 | `delivery_options` (e-commerce) | ✅ auto_send | ⚠️ escalated | **NEW in v4** — debatable: out-of-domain, escalation is defensible |
+| t25 | `delivery_period` (e-commerce) | ✅ auto_send | ⚠️ escalated | **NEW in v4** — debatable: same as t24 |
 
-**The honest read:** 3 clear v4 regressions (t01, t02, t03 — Critic over-flagged simple FAQ drafts), 2 already-broken-in-v3 (t04, t06 — classifier issues unrelated to multi-agent), 2 debatable (out-of-domain e-commerce).
+**The honest read: 5 v4-introduced over-corrections, 2 inherited from v3.** Of the 5 new ones, 3 are clean regressions on benign FAQ/info drafts (t01, t02, t03) and 2 are debatable out-of-domain e-commerce intents (t24, t25) where escalation is arguably correct given the SaaS scope.
+
+Note on framing: tickets like t01 (password reset) auto-send by design in this build because that is the safe self-service path for an authenticated account. Some support orgs would legitimately escalate password resets for additional identity verification — so an "escalated" outcome is not catastrophic, just costly: a human is paged for a workflow the build was set up to handle automatically.
 
 ## By-intent accuracy split
 
