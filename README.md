@@ -293,6 +293,8 @@ docs/   architecture.md
 | [`docs/v3_completion_status.md`](./docs/v3_completion_status.md) | **v3 frozen status snapshot** — captured the day v4 began; phase % and gaps |
 | [`docs/v4_multiagent.md`](./docs/v4_multiagent.md) | **v4 spec amendment** — Researcher + Drafter↔Critic architecture lock + invariants |
 | [`docs/superpowers/plans/2026-05-09-v4-multiagent.md`](./docs/superpowers/plans/2026-05-09-v4-multiagent.md) | **v4 implementation plan** — 10 TDD tasks, full code in each step |
+| [`eval/METHODOLOGY.md`](./eval/METHODOLOGY.md) | **Eval methodology** — three layers (contracts/empirical/adversarial), CIs, what's deferred |
+| [`docs/threat_model.md`](./docs/threat_model.md) | **STRIDE threat model** — asset list + per-threat existing mitigation + honest residual-risk register |
 | [`CLAUDE.md`](./CLAUDE.md) | Project memory — invariants and non-negotiable rules |
 
 ---
