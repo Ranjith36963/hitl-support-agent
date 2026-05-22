@@ -99,19 +99,39 @@ def _select(ds, intent_map: dict[str, tuple[str, str, str]], out_path: Path) -> 
     if missing:
         raise SystemExit(f"No clean row found for intents: {sorted(missing)}")
 
+    # Deterministic dev/test split by SHA-256 of bitext_intent. Only the
+    # 27-intent breadth set has a split column populated; the 10-row file
+    # leaves it empty (caller treats absent column as "all"). Lowest 7 hashes
+    # → dev, remaining → test. Reproducible from the intent name alone, so
+    # `python -m eval.select_bitext` produces the same partition every time.
+    import hashlib
+
+    def _split_for(intent: str, dev_set: set[str]) -> str:
+        return "dev" if intent in dev_set else "test"
+
+    if len(intent_map) > 10:  # the 27 breadth set
+        def _hash_rank(name: str) -> int:
+            return int(hashlib.sha256(name.encode()).hexdigest(), 16)
+        ranked = sorted(intent_map, key=_hash_rank)
+        dev_set = set(ranked[:7])
+    else:
+        dev_set = set()  # no split column for the 10-row file
+
     with open(out_path, "w", encoding="utf-8", newline="") as fh:
         writer = csv.writer(fh)
-        writer.writerow(
-            ["bitext_intent", "category", "instruction",
-             "project_intent", "expected_outcome", "mapping_rationale"]
-        )
+        header = ["bitext_intent", "category", "instruction",
+                  "project_intent", "expected_outcome", "mapping_rationale"]
+        if dev_set:
+            header.append("split")
+        writer.writerow(header)
         for intent in intent_map:  # stable order
             rec = picked[intent]
             proj, outcome, rationale = intent_map[intent]
-            writer.writerow(
-                [rec["bitext_intent"], rec["category"], rec["instruction"],
-                 proj, outcome, rationale]
-            )
+            row = [rec["bitext_intent"], rec["category"], rec["instruction"],
+                   proj, outcome, rationale]
+            if dev_set:
+                row.append(_split_for(intent, dev_set))
+            writer.writerow(row)
     print(f"Wrote {len(picked)} rows -> {out_path}")
 
 

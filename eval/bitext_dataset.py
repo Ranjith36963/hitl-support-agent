@@ -44,8 +44,20 @@ def _subject_for(bitext_intent: str) -> str:
     return bitext_intent.replace("_", " ").capitalize()
 
 
-def _load_bitext_tickets(csv_name: str, id_prefix: str) -> list[EvalTicket]:
-    """Read a Bitext eval CSV -> EvalTicket objects (live-LLM only)."""
+def _load_bitext_tickets(
+    csv_name: str,
+    id_prefix: str,
+    split: str | None = None,
+) -> list[EvalTicket]:
+    """Read a Bitext eval CSV -> EvalTicket objects (live-LLM only).
+
+    `split` filters rows by the optional `split` column. Values:
+      - None or "all" — every row
+      - "dev"          — rows with split=="dev"
+      - "test"         — rows with split=="test"
+    Files without a `split` column (the 10-row set) ignore the filter
+    silently — there's nothing to filter on.
+    """
     csv_path = _DATA_DIR / csv_name
     if not csv_path.exists():
         raise FileNotFoundError(
@@ -55,6 +67,9 @@ def _load_bitext_tickets(csv_name: str, id_prefix: str) -> list[EvalTicket]:
     tickets: list[EvalTicket] = []
     with open(csv_path, encoding="utf-8", newline="") as fh:
         rows = list(csv.DictReader(fh))
+
+    if split and split != "all":
+        rows = [r for r in rows if r.get("split", "") == split]
 
     for i, row in enumerate(rows, start=1):
         ticket_id = f"{id_prefix}-t{i:02d}"
@@ -89,8 +104,22 @@ def _load_bitext_tickets(csv_name: str, id_prefix: str) -> list[EvalTicket]:
 
 # 10 SaaS-mappable intents (focused first batch) and all 27 Bitext intents
 # (breadth set — includes out-of-domain e-commerce intents; see select_bitext.py).
+# The 27-row breadth set has a `split` column (7 dev / 20 test) so reported
+# numbers can stay held-out; the dev split exists for iteration / prompt tuning.
 BITEXT_TICKETS: list[EvalTicket] = _load_bitext_tickets("bitext_eval_10.csv", "bitext")
 BITEXT_TICKETS_27: list[EvalTicket] = _load_bitext_tickets("bitext_eval_27.csv", "bitext27")
+BITEXT_TICKETS_27_DEV: list[EvalTicket] = _load_bitext_tickets(
+    "bitext_eval_27.csv", "bitext27", split="dev"
+)
+BITEXT_TICKETS_27_TEST: list[EvalTicket] = _load_bitext_tickets(
+    "bitext_eval_27.csv", "bitext27", split="test"
+)
 BITEXT_TICKETS_BY_ID: dict[str, EvalTicket] = {t.ticket_id: t for t in BITEXT_TICKETS}
 
-__all__ = ["BITEXT_TICKETS", "BITEXT_TICKETS_27", "BITEXT_TICKETS_BY_ID"]
+__all__ = [
+    "BITEXT_TICKETS",
+    "BITEXT_TICKETS_27",
+    "BITEXT_TICKETS_27_DEV",
+    "BITEXT_TICKETS_27_TEST",
+    "BITEXT_TICKETS_BY_ID",
+]

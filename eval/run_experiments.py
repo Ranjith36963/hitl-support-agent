@@ -71,7 +71,12 @@ from eval.adversarial_evaluators import (  # noqa: E402
     render_adversarial_markdown,
     serialise_for_json,
 )
-from eval.bitext_dataset import BITEXT_TICKETS, BITEXT_TICKETS_27  # noqa: E402
+from eval.bitext_dataset import (  # noqa: E402
+    BITEXT_TICKETS,
+    BITEXT_TICKETS_27,
+    BITEXT_TICKETS_27_DEV,
+    BITEXT_TICKETS_27_TEST,
+)
 from eval.dataset import EVAL_TICKETS, EvalTicket  # noqa: E402
 from eval.evaluators import (  # noqa: E402
     EvalResult,
@@ -81,6 +86,7 @@ from eval.evaluators import (  # noqa: E402
     intent_accuracy,
     response_quality,
 )
+from eval.stats import bootstrap_ci, mean_std  # noqa: E402
 from mcp_server.support_read import search_kb  # noqa: E402
 from src.graph import async_sqlite_checkpointer, compile_full_with_checkpointer  # noqa: E402
 from src.llm import ClassificationResult, DraftResult  # noqa: E402
@@ -489,6 +495,38 @@ async def _run_all(
         total_run_cost_usd / len(results) if results else 0.0
     )
 
+    # --- Bootstrap CIs on the headline scalars. Per-ticket binary outcomes
+    # are reconstructed here (no schema change to the existing evaluators).
+    # CIs at small N (the bitext27_test split is N=20) will be visibly wide;
+    # that is the honest signal — read [lo, hi], not just the point estimate.
+    per_ticket_intent_correct = [
+        1.0 if r.actual_intent == r.ticket.expected_intent else 0.0
+        for r in results
+    ]
+    per_ticket_outcome_correct = [
+        1.0 if r.actual_outcome == r.ticket.expected_outcome else 0.0
+        for r in results
+    ]
+    per_ticket_false_auto_send = [
+        1.0
+        if (r.actual_outcome == "auto_send" and r.ticket.expected_outcome != "auto_send")
+        else 0.0
+        for r in results
+    ]
+    per_ticket_response_quality_scores = [
+        p["score"]
+        for p in resp_qual.get("per_ticket", [])
+        if p.get("score") is not None
+    ]
+    intent_acc_ci = bootstrap_ci(per_ticket_intent_correct)
+    esc_prec_ci = bootstrap_ci(per_ticket_outcome_correct)
+    fasr_ci = bootstrap_ci(per_ticket_false_auto_send)
+    resp_qual_ci = (
+        bootstrap_ci(per_ticket_response_quality_scores)
+        if per_ticket_response_quality_scores
+        else (0.0, 0.0, 0.0)
+    )
+
     # --- Build output dicts ---
     metrics: dict[str, Any] = {
         "run_timestamp": datetime.now(UTC).isoformat(),
@@ -497,10 +535,16 @@ async def _run_all(
         "version": version_label,
         "ticket_count": len(results),
         "intent_accuracy": round(intent_acc, 4),
+        "intent_accuracy_ci95": [round(intent_acc_ci[1], 4), round(intent_acc_ci[2], 4)],
         "escalation_precision": round(esc_prec["precision"], 4),
+        "escalation_precision_ci95": [round(esc_prec_ci[1], 4), round(esc_prec_ci[2], 4)],
         "false_auto_send_rate": fasr["rate"],
+        "false_auto_send_rate_ci95": [round(fasr_ci[1], 4), round(fasr_ci[2], 4)],
         "false_auto_send_safety_pass": fasr["safety_pass"],
         "response_quality_avg": resp_qual.get("avg_score"),
+        "response_quality_ci95": [round(resp_qual_ci[1], 4), round(resp_qual_ci[2], 4)]
+        if per_ticket_response_quality_scores
+        else None,
         "total_run_tokens": total_run_tokens,
         "total_run_cost_usd": round(total_run_cost_usd, 6),
         "cost_per_ticket_avg_usd": round(cost_per_ticket_avg, 6),
@@ -512,6 +556,8 @@ async def _run_all(
             {
                 "ticket_id": r.ticket.ticket_id,
                 "description": r.ticket.description,
+                "customer_message_snippet": r.ticket.customer_message[:240],
+                "final_draft": r.final_draft,
                 "expected_intent": r.ticket.expected_intent,
                 "actual_intent": r.actual_intent,
                 "intent_match": r.actual_intent == r.ticket.expected_intent,
@@ -555,18 +601,109 @@ async def _run_all(
         for fa in fasr["false_auto_sends"]:
             print(f"    {fa['ticket_id']}: {fa['description']}")
 
-    print(f"\nSummary: intent_accuracy={intent_acc:.1%}  "
-          f"escalation_precision={esc_prec['precision']:.1%}  "
-          f"false_auto_send_rate={fasr['rate']:.1%}")
+    print(
+        f"\nSummary: intent_accuracy={intent_acc:.1%} "
+        f"[{intent_acc_ci[1]:.0%}–{intent_acc_ci[2]:.0%}]  "
+        f"escalation_precision={esc_prec['precision']:.1%} "
+        f"[{esc_prec_ci[1]:.0%}–{esc_prec_ci[2]:.0%}]  "
+        f"false_auto_send_rate={fasr['rate']:.1%} "
+        f"[{fasr_ci[1]:.0%}–{fasr_ci[2]:.0%}]"
+    )
     if resp_qual.get("avg_score") is not None:
-        print(f"         response_quality={resp_qual['avg_score']:.2f}/5")
+        print(
+            f"         response_quality={resp_qual['avg_score']:.2f}/5 "
+            f"[{resp_qual_ci[1]:.2f}–{resp_qual_ci[2]:.2f}]"
+        )
     else:
         print("         response_quality=-- (LLM not available)")
+    print("         (square brackets = 95% bootstrap CI, N=" f"{len(results)})")
     if total_run_cost_usd > 0:
         print(
             f"         cost: ${total_run_cost_usd:.4f} total · "
             f"${cost_per_ticket_avg:.4f}/ticket · {total_run_tokens:,} tokens"
         )
+
+
+async def _run_with_reps(
+    no_llm: bool,
+    tickets: list[EvalTicket],
+    dataset_label: str,
+    version_label: str,
+    ticket_delay_sec: float,
+    n_reps: int,
+) -> None:
+    """Run `_run_all` N times to estimate the run-to-run noise floor.
+
+    Each rep writes its own JSON+MD as
+    `results_{dataset}_rep{i}_{version}.{json,md}`. After all reps land, this
+    function aggregates mean ± std per scalar metric into
+    `results_{dataset}_noise_{version}.json` and a short markdown summary.
+
+    No retries here — if a single rep fails partway, the noise summary will be
+    over fewer reps. Honest behaviour: do not invent missing data.
+    """
+    per_rep_metrics: list[dict[str, Any]] = []
+    for i in range(1, n_reps + 1):
+        rep_label = f"{dataset_label}_rep{i}"
+        print(f"\n[eval] === noise-floor rep {i}/{n_reps} ===")
+        await _run_all(
+            no_llm=no_llm,
+            tickets=tickets,
+            dataset_label=rep_label,
+            version_label=version_label,
+            ticket_delay_sec=ticket_delay_sec,
+        )
+        # Read the rep's JSON back so we have the metric numbers.
+        rep_path = Path(__file__).parent / f"results_{rep_label}_{version_label}.json"
+        if rep_path.exists():
+            with open(rep_path, encoding="utf-8") as f:  # noqa: ASYNC230
+                per_rep_metrics.append(json.load(f))
+
+    if not per_rep_metrics:
+        print("[eval] no rep metrics captured — aborting noise summary.")
+        return
+
+    # Aggregate scalar metrics across reps as mean ± std.
+    scalar_keys = [
+        "intent_accuracy",
+        "escalation_precision",
+        "false_auto_send_rate",
+        "response_quality_avg",
+        "total_run_cost_usd",
+    ]
+    summary: dict[str, Any] = {
+        "dataset": dataset_label,
+        "version": version_label,
+        "n_reps": len(per_rep_metrics),
+        "rep_files": [
+            f"results_{dataset_label}_rep{i + 1}_{version_label}.json"
+            for i in range(len(per_rep_metrics))
+        ],
+        "per_metric_mean_std": {},
+    }
+    for key in scalar_keys:
+        values = [
+            float(m.get(key) or 0.0)
+            for m in per_rep_metrics
+            if m.get(key) is not None
+        ]
+        mean, std = mean_std(values)
+        summary["per_metric_mean_std"][key] = {
+            "mean": round(mean, 4),
+            "std": round(std, 4),
+            "values": [round(v, 4) for v in values],
+        }
+
+    out_json = Path(__file__).parent / f"results_{dataset_label}_noise_{version_label}.json"
+    with open(out_json, "w", encoding="utf-8") as f:  # noqa: ASYNC230
+        json.dump(summary, f, indent=2, default=str)
+    print(f"\n[eval] noise summary written -> {out_json}")
+
+    print("\nRun-to-run noise floor (mean ± std across reps):")
+    for key in scalar_keys:
+        block = summary["per_metric_mean_std"][key]
+        print(f"  {key:<28}  {block['mean']:.3f} ± {block['std']:.3f}  "
+              f"(values: {block['values']})")
 
 
 async def _write_adversarial_results(
@@ -659,6 +796,19 @@ def _write_results_md(
     resp_qual = metrics["response_quality_avg"]
     resp_qual_str = f"{resp_qual:.2f}/5" if resp_qual is not None else "--"
     safety_str = "0.0% v PASS" if metrics["false_auto_send_safety_pass"] else f"{fasr:.1%} x FAIL"
+    # Bootstrap-CI strings. Older eval result files (pre Commit 4) don't carry
+    # *_ci95 keys; fall back to empty so reading them doesn't crash.
+    def _ci(key: str, pct: bool = False) -> str:
+        ci = metrics.get(key)
+        if not ci or not isinstance(ci, list) or len(ci) != 2:
+            return ""
+        if pct:
+            return f" [{ci[0] * 100:.0f}%–{ci[1] * 100:.0f}%]"
+        return f" [{ci[0]:.2f}–{ci[1]:.2f}]"
+    intent_ci_str = _ci("intent_accuracy_ci95", pct=True)
+    esc_ci_str = _ci("escalation_precision_ci95", pct=True)
+    fasr_ci_str = _ci("false_auto_send_rate_ci95", pct=True)
+    resp_ci_str = _ci("response_quality_ci95")
     version = metrics.get("version", "v3")
     dataset = metrics.get("dataset", "curated")
     resp_note = "skipped (--no-llm mode)" if no_llm else "LLM-as-judge rubric score"
@@ -674,10 +824,14 @@ def _write_results_md(
         "",
         f"| Metric | {version} | Target | Notes |",
         "|---|---|---|---|",
-        f"| False auto-send rate | {safety_str} | 0% | Primary safety metric |",
-        f"| Intent accuracy | {intent_acc:.1%} | >85% | Exact-match vs expected_intent |",
-        f"| Escalation precision | {esc_prec:.1%} | >90% | Correct escalate/auto-send decision |",
-        f"| Response quality (LLM judge) | {resp_qual_str} | >4.0/5 | {resp_note} |",
+        f"| False auto-send rate | {safety_str}{fasr_ci_str} | 0% | "
+        "Primary safety metric — bootstrap 95% CI in brackets |",
+        f"| Intent accuracy | {intent_acc:.1%}{intent_ci_str} | >85% | "
+        "Exact-match vs expected_intent |",
+        f"| Escalation precision | {esc_prec:.1%}{esc_ci_str} | >90% | "
+        "Correct escalate/auto-send decision |",
+        f"| Response quality (LLM judge) | {resp_qual_str}{resp_ci_str} | >4.0/5 | "
+        f"{resp_note} |",
         f"| Total run cost | ${metrics.get('total_run_cost_usd', 0.0):.4f} | — | "
         f"{metrics.get('total_run_tokens', 0):,} tokens; "
         f"${metrics.get('cost_per_ticket_avg_usd', 0.0):.4f}/ticket avg |",
@@ -820,6 +974,28 @@ def _parse_args() -> argparse.Namespace:
             "to stay under rate limits on free LLM tiers."
         ),
     )
+    parser.add_argument(
+        "--split",
+        choices=["dev", "test", "all"],
+        default="all",
+        help=(
+            "Which split of --dataset bitext27 to run. METHODOLOGY.md mandates "
+            "'test' for reported numbers; 'dev' is for prompt iteration; 'all' "
+            "is the original 27-row breadth set (default for back-compat). "
+            "Ignored for other datasets."
+        ),
+    )
+    parser.add_argument(
+        "--reps",
+        type=int,
+        default=1,
+        help=(
+            "Run the full ticket loop N times to estimate the run-to-run noise "
+            "floor. Outputs each rep as a numbered file plus a noise summary "
+            "(mean ± std per metric). CI never runs this; it's manual. Cost "
+            "scales linearly with N."
+        ),
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
         "--multiagent",
@@ -873,21 +1049,50 @@ def main() -> None:
         if args.dataset == "bitext":
             tickets = BITEXT_TICKETS
         elif args.dataset == "bitext27":
-            tickets = BITEXT_TICKETS_27
+            if args.split == "dev":
+                tickets = BITEXT_TICKETS_27_DEV
+            elif args.split == "test":
+                tickets = BITEXT_TICKETS_27_TEST
+            else:
+                tickets = BITEXT_TICKETS_27
         else:  # adversarial
             tickets = ADVERSARIAL_TICKETS
     else:
         tickets = EVAL_TICKETS
 
-    asyncio.run(
-        _run_all(
-            no_llm=args.no_llm,
-            tickets=tickets,
-            dataset_label=args.dataset,
-            version_label=version_label,
-            ticket_delay_sec=args.ticket_delay_sec,
+    if args.split != "all" and args.dataset != "bitext27":
+        print(
+            f"[eval] WARNING: --split={args.split!r} is only meaningful for "
+            f"--dataset bitext27. Ignoring."
         )
-    )
+
+    # Append the split to the dataset label so output files don't collide
+    # between dev / test runs on the same dataset+version.
+    effective_label = args.dataset
+    if args.dataset == "bitext27" and args.split != "all":
+        effective_label = f"{args.dataset}_{args.split}"
+
+    if args.reps > 1:
+        asyncio.run(
+            _run_with_reps(
+                no_llm=args.no_llm,
+                tickets=tickets,
+                dataset_label=effective_label,
+                version_label=version_label,
+                ticket_delay_sec=args.ticket_delay_sec,
+                n_reps=args.reps,
+            )
+        )
+    else:
+        asyncio.run(
+            _run_all(
+                no_llm=args.no_llm,
+                tickets=tickets,
+                dataset_label=effective_label,
+                version_label=version_label,
+                ticket_delay_sec=args.ticket_delay_sec,
+            )
+        )
 
 
 if __name__ == "__main__":

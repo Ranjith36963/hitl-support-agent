@@ -353,6 +353,7 @@ def failure_slice(results: list[EvalResult]) -> dict[str, Any]:
 
 __all__ = [
     "EvalResult",
+    "QUALITY_RUBRIC",
     "escalation_precision",
     "failure_slice",
     "false_auto_send_rate",
