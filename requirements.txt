@@ -30,6 +30,9 @@ pydantic>=2.9.0
 pydantic-settings>=2.6.0
 python-dotenv>=1.0.1
 
+# Observability — Prometheus metrics; `/metrics` endpoint on the FastAPI app.
+prometheus-client>=0.21.0
+
 # Eval data
 pandas>=2.2.0
 datasets>=3.0.0

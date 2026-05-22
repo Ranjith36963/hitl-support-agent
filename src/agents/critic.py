@@ -15,6 +15,7 @@ augments, never replaces, the deterministic safety gates.
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -22,6 +23,7 @@ from langsmith import traceable
 
 from src.agents.base import build_handoff_metadata, get_llm, get_model_id, load_prompt
 from src.llm import track_llm_usage
+from src.metrics import LLM_LATENCY
 from src.state import AgentState
 
 _CRITIC_PROMPT = load_prompt("critic_system")
@@ -46,15 +48,19 @@ async def _llm_judge(
     """
     client = get_llm()
     model = get_model_id("CRITIC_MODEL_OVERRIDE")
-    resp = await client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": _CRITIC_PROMPT},
-            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-        ],
-        response_format={"type": "json_object"},
-        temperature=0.1,  # determinism > creativity for an auditor
-    )
+    start = time.monotonic()
+    try:
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _CRITIC_PROMPT},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.1,  # determinism > creativity for an auditor
+        )
+    finally:
+        LLM_LATENCY.labels(call="critic").observe(time.monotonic() - start)
     track_llm_usage(state, "critic", model, getattr(resp, "usage", None))
     raw = (resp.choices[0].message.content or "").strip()
     try:

@@ -17,11 +17,14 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import TYPE_CHECKING, Any
 
 from langsmith import traceable
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
+
+from src.metrics import LLM_LATENCY, LLM_TOKENS
 
 if TYPE_CHECKING:
     from src.state import AgentState
@@ -75,10 +78,27 @@ def track_llm_usage(
         model: model id string used for the request — looked up in _PRICING.
         usage: OpenAI usage object (has `prompt_tokens` + `completion_tokens`).
     """
-    if state is None or usage is None:
+    if usage is None:
         return
-    prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
-    completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+    # Coerce to int defensively. Test mocks pass MagicMock objects whose
+    # `.usage.prompt_tokens` is another MagicMock; an `or 0` short-circuit
+    # treats MagicMock as truthy. Anything that isn't a plain int/float falls
+    # through to 0 — same outcome as "no usage info available".
+    raw_prompt = getattr(usage, "prompt_tokens", 0)
+    raw_completion = getattr(usage, "completion_tokens", 0)
+    prompt_tokens = raw_prompt if isinstance(raw_prompt, (int, float)) else 0
+    completion_tokens = (
+        raw_completion if isinstance(raw_completion, (int, float)) else 0
+    )
+
+    # Prometheus token counters fire on every LLM call — independent of
+    # whether a state dict was supplied (so observability works for the
+    # cross-judge script, tests, smoke probes too).
+    LLM_TOKENS.labels(call=label, kind="prompt").inc(prompt_tokens)
+    LLM_TOKENS.labels(call=label, kind="completion").inc(completion_tokens)
+
+    if state is None:
+        return
     cost = _compute_cost(model, prompt_tokens, completion_tokens)
     # Dict mutations survive LangGraph's super-step merge (the dict object is
     # shared by reference). Scalar reassignments don't — they get reverted when
@@ -272,12 +292,16 @@ async def _chat_json(
     pass `state=None` and the helper short-circuits.
     """
     model = _model()
-    resp = await _client().chat.completions.create(
-        model=model,
-        messages=messages,
-        response_format={"type": "json_object"},
-        temperature=0.2,
-    )
+    start = time.monotonic()
+    try:
+        resp = await _client().chat.completions.create(
+            model=model,
+            messages=messages,
+            response_format={"type": "json_object"},
+            temperature=0.2,
+        )
+    finally:
+        LLM_LATENCY.labels(call=label).observe(time.monotonic() - start)
     track_llm_usage(state, label, model, getattr(resp, "usage", None))
     content = (resp.choices[0].message.content or "").strip()
     return json.loads(content)

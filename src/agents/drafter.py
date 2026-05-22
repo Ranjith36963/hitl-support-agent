@@ -15,6 +15,7 @@ Output shape matches v3 draft_response_node so downstream nodes are unchanged:
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -24,6 +25,7 @@ from langsmith import traceable
 from src.agents.base import build_handoff_metadata, get_llm, get_model_id, load_prompt
 from src.agents.critic import critic_node
 from src.llm import track_llm_usage
+from src.metrics import LLM_LATENCY
 from src.state import AgentState
 
 # Loop cap. The route condition is `iteration < MAX_CRITIC_ITERATIONS - 1`,
@@ -47,15 +49,19 @@ async def _llm_draft(
     """
     client = get_llm()
     model = get_model_id("DRAFTER_MODEL_OVERRIDE")
-    resp = await client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": _DRAFTER_PROMPT},
-            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-        ],
-        response_format={"type": "json_object"},
-        temperature=0.2,
-    )
+    start = time.monotonic()
+    try:
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _DRAFTER_PROMPT},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.2,
+        )
+    finally:
+        LLM_LATENCY.labels(call="drafter").observe(time.monotonic() - start)
     track_llm_usage(state, "drafter", model, getattr(resp, "usage", None))
     return json.loads((resp.choices[0].message.content or "").strip())
 
