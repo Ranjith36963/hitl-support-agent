@@ -249,7 +249,7 @@ def pii_redact_node(state: AgentState) -> dict[str, Any]:
 
 
 async def classify_intent_node(state: AgentState) -> dict[str, Any]:
-    result = await classify_intent(state["customer_message"])
+    result = await classify_intent(state["customer_message"], state=state)
     return {
         "intent": result.intent,
         "intent_confidence": result.intent_confidence,
@@ -365,6 +365,7 @@ async def draft_response_node(state: AgentState) -> dict[str, Any]:
         customer_history=history,
         policy_quotes=kb_quotes,
         rejection_reason=state.get("rejection_reason"),
+        state=state,
     )
     return {
         "original_draft": state.get("original_draft") or result.draft,
@@ -626,7 +627,7 @@ async def summarize_changes_node(state: AgentState) -> dict[str, Any]:
         "policy_matches": state.get("policy_matches") or [],
     }
     new_snapshot = state.get("_revalidate_new_snapshot") or {}
-    delta = await summarize_context_changes(old_snapshot, new_snapshot)
+    delta = await summarize_context_changes(old_snapshot, new_snapshot, state=state)
 
     if state.get("slack_message_ts"):
         client = _client()

@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from eval.dataset import EvalTicket
@@ -49,6 +49,13 @@ class EvalResult:
     error: str | None = None  # set if graph raised an exception
     llm_available: bool = True
     human_rejection_count: int = 0  # incremented each time human rejected draft
+
+    # Cost telemetry — populated from terminal AgentState. Zero in --no-llm mode
+    # and any time `_PRICING` table doesn't know the model id (fail-quiet, never
+    # surface a wrong number).
+    total_tokens: int = 0
+    total_cost_usd: float = 0.0
+    cost_breakdown: dict[str, float] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

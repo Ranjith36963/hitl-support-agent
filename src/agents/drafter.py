@@ -23,6 +23,7 @@ from langsmith import traceable
 
 from src.agents.base import build_handoff_metadata, get_llm, get_model_id, load_prompt
 from src.agents.critic import critic_node
+from src.llm import track_llm_usage
 from src.state import AgentState
 
 # Loop cap. The route condition is `iteration < MAX_CRITIC_ITERATIONS - 1`,
@@ -35,11 +36,19 @@ _DRAFTER_PROMPT = load_prompt("drafter_system")
 
 
 @traceable(run_type="llm", name="drafter_llm")
-async def _llm_draft(payload: dict[str, Any]) -> dict[str, Any]:
-    """Module-level so tests can patch / mock cleanly."""
+async def _llm_draft(
+    payload: dict[str, Any], state: AgentState | None = None
+) -> dict[str, Any]:
+    """Module-level so tests can patch / mock cleanly.
+
+    `state` is optional. When supplied, token+cost telemetry from the response
+    is folded into AgentState via `track_llm_usage` under the "drafter" label.
+    Tests that monkeypatch this function pass `state=None` or omit it.
+    """
     client = get_llm()
+    model = get_model_id("DRAFTER_MODEL_OVERRIDE")
     resp = await client.chat.completions.create(
-        model=get_model_id("DRAFTER_MODEL_OVERRIDE"),
+        model=model,
         messages=[
             {"role": "system", "content": _DRAFTER_PROMPT},
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
@@ -47,6 +56,7 @@ async def _llm_draft(payload: dict[str, Any]) -> dict[str, Any]:
         response_format={"type": "json_object"},
         temperature=0.2,
     )
+    track_llm_usage(state, "drafter", model, getattr(resp, "usage", None))
     return json.loads((resp.choices[0].message.content or "").strip())
 
 
@@ -69,7 +79,7 @@ async def drafter_node(state: AgentState) -> dict[str, Any]:
     if state.get("rejection_reason"):
         payload["prior_rejection_reason"] = state["rejection_reason"]
 
-    result = await _llm_draft(payload)
+    result = await _llm_draft(payload, state=state)
 
     return {
         # Preserve original_draft from iteration 0; later iterations overwrite final_draft only

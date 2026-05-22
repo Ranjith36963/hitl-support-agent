@@ -322,6 +322,11 @@ async def _run_ticket(
             final_draft = values.get("final_draft", "") or values.get("original_draft", "")
             actual_rejection_count = values.get("human_rejection_count", 0)
 
+            # Derive totals from the dict-form breakdowns (scalar AgentState
+            # fields don't survive LangGraph's super-step merge — see comment
+            # in src/llm.py:track_llm_usage).
+            cost_bd = dict(values.get("cost_breakdown") or {})
+            tokens_bd = dict(values.get("tokens_breakdown") or {})
             return EvalResult(
                 ticket=ticket,
                 actual_intent=actual_intent,
@@ -333,6 +338,9 @@ async def _run_ticket(
                 error=None,
                 llm_available=not no_llm,
                 human_rejection_count=actual_rejection_count,
+                total_tokens=sum(tokens_bd.values()),
+                total_cost_usd=sum(cost_bd.values()),
+                cost_breakdown=cost_bd,
             )
 
     except Exception as exc:  # noqa: BLE001 -- harness must not crash on one bad ticket
@@ -457,6 +465,13 @@ async def _run_all(
     # Response quality: async, may return None values if no LLM
     resp_qual = await response_quality(results)
 
+    # --- Cost aggregation across the run ---
+    total_run_tokens = sum(r.total_tokens for r in results)
+    total_run_cost_usd = sum(r.total_cost_usd for r in results)
+    cost_per_ticket_avg = (
+        total_run_cost_usd / len(results) if results else 0.0
+    )
+
     # --- Build output dicts ---
     metrics: dict[str, Any] = {
         "run_timestamp": datetime.now(UTC).isoformat(),
@@ -469,6 +484,9 @@ async def _run_all(
         "false_auto_send_rate": fasr["rate"],
         "false_auto_send_safety_pass": fasr["safety_pass"],
         "response_quality_avg": resp_qual.get("avg_score"),
+        "total_run_tokens": total_run_tokens,
+        "total_run_cost_usd": round(total_run_cost_usd, 6),
+        "cost_per_ticket_avg_usd": round(cost_per_ticket_avg, 6),
         "escalation_details": esc_prec,
         "false_auto_send_details": fasr,
         "failure_slice": f_slice,
@@ -489,6 +507,9 @@ async def _run_all(
                 "final_state": r.final_state,
                 "human_rejection_count": r.human_rejection_count,
                 "error": r.error,
+                "total_tokens": r.total_tokens,
+                "total_cost_usd": round(r.total_cost_usd, 6),
+                "cost_breakdown": {k: round(v, 6) for k, v in r.cost_breakdown.items()},
             }
             for r in results
         ],
@@ -523,6 +544,11 @@ async def _run_all(
         print(f"         response_quality={resp_qual['avg_score']:.2f}/5")
     else:
         print("         response_quality=-- (LLM not available)")
+    if total_run_cost_usd > 0:
+        print(
+            f"         cost: ${total_run_cost_usd:.4f} total · "
+            f"${cost_per_ticket_avg:.4f}/ticket · {total_run_tokens:,} tokens"
+        )
 
 
 def _write_results_md(
@@ -569,11 +595,14 @@ def _write_results_md(
         f"| Intent accuracy | {intent_acc:.1%} | >85% | Exact-match vs expected_intent |",
         f"| Escalation precision | {esc_prec:.1%} | >90% | Correct escalate/auto-send decision |",
         f"| Response quality (LLM judge) | {resp_qual_str} | >4.0/5 | {resp_note} |",
+        f"| Total run cost | ${metrics.get('total_run_cost_usd', 0.0):.4f} | — | "
+        f"{metrics.get('total_run_tokens', 0):,} tokens; "
+        f"${metrics.get('cost_per_ticket_avg_usd', 0.0):.4f}/ticket avg |",
         "",
         "## Per-ticket results",
         "",
-        "| ID | Description | Expected | Actual | Intent match | Channel | Status |",
-        "|---|---|---|---|---|---|---|",
+        "| ID | Description | Expected | Actual | Intent match | Channel | Status | Cost |",
+        "|---|---|---|---|---|---|---|---|",
     ]
 
     for r in results:
@@ -583,6 +612,7 @@ def _write_results_md(
             outcome_sym = "ERROR"
         intent_sym = "OK" if r.actual_intent == t.expected_intent else "FAIL"
         channel = r.actual_channel or "--"
+        cost_str = f"${r.total_cost_usd:.4f}" if r.total_cost_usd > 0 else "--"
         lines.append(
             f"| {t.ticket_id} "
             f"| {t.description[:50]}... "
@@ -590,7 +620,8 @@ def _write_results_md(
             f"| {r.actual_outcome} ({outcome_sym}) "
             f"| {r.actual_intent} ({intent_sym}) "
             f"| {channel} "
-            f"| {r.final_state} |"
+            f"| {r.final_state} "
+            f"| {cost_str} |"
         )
 
     # Failure slice breakdown

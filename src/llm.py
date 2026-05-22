@@ -17,11 +17,78 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langsmith import traceable
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from src.state import AgentState
+
+# ---------------------------------------------------------------------------
+# Pricing — per-1K-token USD costs. Verified 2026-05-22 from each provider's
+# pricing page. Treat reported eval $ as approximate; update on provider drift.
+# Unknown model_ids fall back to (0.0, 0.0) — cost reports as zero rather than
+# crashing the run.
+# ---------------------------------------------------------------------------
+
+_PRICING: dict[str, tuple[float, float]] = {
+    # ---- OpenAI direct ----
+    "gpt-4o-mini": (0.00015, 0.0006),
+    "gpt-4o": (0.0025, 0.01),
+    "gpt-4.1-mini": (0.0004, 0.0016),
+    "gpt-4.1": (0.002, 0.008),
+    # ---- OpenRouter (model_id verbatim) ----
+    "deepseek/deepseek-chat": (0.00014, 0.00028),
+    "deepseek/deepseek-v4-flash": (0.0, 0.0),
+    "deepseek/deepseek-v4-flash:free": (0.0, 0.0),
+    "anthropic/claude-3.5-haiku": (0.0008, 0.004),
+    "meta-llama/llama-3.3-70b-instruct:free": (0.0, 0.0),
+}
+
+
+def _compute_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    """USD cost for one OpenAI-shape response. Unknown model → 0.0 (logged as such)."""
+    in_per_1k, out_per_1k = _PRICING.get(model, (0.0, 0.0))
+    return (prompt_tokens / 1000.0) * in_per_1k + (completion_tokens / 1000.0) * out_per_1k
+
+
+def track_llm_usage(
+    state: "AgentState | None",
+    label: str,
+    model: str,
+    usage: Any,
+) -> None:
+    """Accumulate token + cost into AgentState. Safe to call with state=None.
+
+    Mutates state in-place when supplied so callers don't need to merge a dict
+    back through the LangGraph node-return pattern (cost fields are observability,
+    not control flow). Two call paths exist:
+      1. v3: `_chat_json` calls this after every response.
+      2. v4: `src/agents/drafter._llm_draft` and `src/agents/critic._llm_judge`
+         call this after their direct `client.chat.completions.create(...)`.
+
+    Args:
+        state: AgentState dict, or None when called from a test/mock path.
+        label: short tag for cost_breakdown (e.g. "classify", "drafter", "critic").
+        model: model id string used for the request — looked up in _PRICING.
+        usage: OpenAI usage object (has `prompt_tokens` + `completion_tokens`).
+    """
+    if state is None or usage is None:
+        return
+    prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+    completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+    cost = _compute_cost(model, prompt_tokens, completion_tokens)
+    # Dict mutations survive LangGraph's super-step merge (the dict object is
+    # shared by reference). Scalar reassignments don't — they get reverted when
+    # the framework reconstructs state from each node's partial-return dict.
+    # So we accumulate into dicts only; callers compute totals at read time.
+    breakdown = state.setdefault("cost_breakdown", {})
+    breakdown[label] = breakdown.get(label, 0.0) + cost
+    tokens = state.setdefault("tokens_breakdown", {})
+    tokens[label] = tokens.get(label, 0) + prompt_tokens + completion_tokens
+
 
 # ---------------------------------------------------------------------------
 # Client + config
@@ -189,29 +256,45 @@ def _ls_metadata(state: dict[str, Any], extra: dict[str, Any] | None = None) -> 
     return md
 
 
-async def _chat_json(messages: list[dict[str, str]]) -> dict[str, Any]:
+async def _chat_json(
+    messages: list[dict[str, str]],
+    *,
+    label: str = "other",
+    state: "AgentState | None" = None,
+) -> dict[str, Any]:
     """Call the model and parse a JSON object out of the response.
 
     DeepSeek follows OpenAI's response_format JSON-mode well. Falls back to
     raw .strip() parsing when response_format isn't honored.
+
+    `state` is optional — when supplied, the cost+token telemetry is folded
+    back into AgentState via `track_llm_usage`. Tests that mock the LLM call
+    pass `state=None` and the helper short-circuits.
     """
+    model = _model()
     resp = await _client().chat.completions.create(
-        model=_model(),
+        model=model,
         messages=messages,
         response_format={"type": "json_object"},
         temperature=0.2,
     )
+    track_llm_usage(state, label, model, getattr(resp, "usage", None))
     content = (resp.choices[0].message.content or "").strip()
     return json.loads(content)
 
 
 @traceable(run_type="llm", name="classify_intent")
-async def classify_intent(customer_message_redacted: str) -> ClassificationResult:
+async def classify_intent(
+    customer_message_redacted: str,
+    state: "AgentState | None" = None,
+) -> ClassificationResult:
     data = await _chat_json(
         [
             {"role": "system", "content": CLASSIFY_SYSTEM},
             {"role": "user", "content": customer_message_redacted},
-        ]
+        ],
+        label="classify",
+        state=state,
     )
     return ClassificationResult.model_validate(data)
 
@@ -224,6 +307,7 @@ async def draft_response(
     customer_history: list[dict[str, Any]],
     policy_quotes: list[str],
     rejection_reason: str | None = None,
+    state: "AgentState | None" = None,
 ) -> DraftResult:
     user_block: dict[str, Any] = {
         "customer_message": customer_message_redacted,
@@ -239,14 +323,18 @@ async def draft_response(
         [
             {"role": "system", "content": DRAFT_SYSTEM},
             {"role": "user", "content": json.dumps(user_block, ensure_ascii=False)},
-        ]
+        ],
+        label="draft",
+        state=state,
     )
     return DraftResult.model_validate(data)
 
 
 @traceable(run_type="llm", name="summarize_context_changes")
 async def summarize_context_changes(
-    old_snapshot: dict[str, Any], new_snapshot: dict[str, Any]
+    old_snapshot: dict[str, Any],
+    new_snapshot: dict[str, Any],
+    state: "AgentState | None" = None,
 ) -> ContextDelta:
     data = await _chat_json(
         [
@@ -257,7 +345,9 @@ async def summarize_context_changes(
                     {"old": old_snapshot, "new": new_snapshot}, ensure_ascii=False
                 ),
             },
-        ]
+        ],
+        label="summarize_changes",
+        state=state,
     )
     return ContextDelta.model_validate(data)
 
@@ -266,8 +356,10 @@ __all__ = [
     "ClassificationResult",
     "ContextDelta",
     "DraftResult",
+    "_compute_cost",
     "_ls_metadata",
     "classify_intent",
     "draft_response",
     "summarize_context_changes",
+    "track_llm_usage",
 ]

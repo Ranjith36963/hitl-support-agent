@@ -21,16 +21,22 @@ from typing import Any
 from langsmith import traceable
 
 from src.agents.base import build_handoff_metadata, get_llm, get_model_id, load_prompt
+from src.llm import track_llm_usage
 from src.state import AgentState
 
 _CRITIC_PROMPT = load_prompt("critic_system")
 
 
 @traceable(run_type="llm", name="critic_judge")
-async def _llm_judge(payload: dict[str, Any]) -> dict[str, Any]:
+async def _llm_judge(
+    payload: dict[str, Any], state: AgentState | None = None
+) -> dict[str, Any]:
     """Call the LLM to score the draft. Returns {verdict, severity, feedback}.
 
     Module-level so tests can patch `src.agents.critic._llm_judge`.
+
+    `state` is optional — when supplied, token+cost telemetry is accumulated
+    under the "critic" label. Tests that mock this function omit it.
 
     Failure mode: if the LLM returns malformed JSON (response_format=json_object
     is reliable on DeepSeek but not bulletproof), escalate-on-uncertainty —
@@ -39,8 +45,9 @@ async def _llm_judge(payload: dict[str, Any]) -> dict[str, Any]:
     to a human, never silently pass through.
     """
     client = get_llm()
+    model = get_model_id("CRITIC_MODEL_OVERRIDE")
     resp = await client.chat.completions.create(
-        model=get_model_id("CRITIC_MODEL_OVERRIDE"),
+        model=model,
         messages=[
             {"role": "system", "content": _CRITIC_PROMPT},
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
@@ -48,6 +55,7 @@ async def _llm_judge(payload: dict[str, Any]) -> dict[str, Any]:
         response_format={"type": "json_object"},
         temperature=0.1,  # determinism > creativity for an auditor
     )
+    track_llm_usage(state, "critic", model, getattr(resp, "usage", None))
     raw = (resp.choices[0].message.content or "").strip()
     try:
         return json.loads(raw)
@@ -74,7 +82,7 @@ async def critic_node(state: AgentState) -> dict[str, Any]:
         "policy_quotes": state.get("policy_matches") or [],
         "intent": state.get("intent", ""),
     }
-    verdict = await _llm_judge(payload)
+    verdict = await _llm_judge(payload, state=state)
 
     severity = float(verdict.get("severity", 0.0))
     severity = max(0.0, min(1.0, severity))  # clamp to [0,1]
