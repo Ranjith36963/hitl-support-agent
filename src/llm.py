@@ -55,7 +55,7 @@ def _compute_cost(model: str, prompt_tokens: int, completion_tokens: int) -> flo
 
 
 def track_llm_usage(
-    state: "AgentState | None",
+    state: AgentState | None,
     label: str,
     model: str,
     usage: Any,
@@ -260,7 +260,7 @@ async def _chat_json(
     messages: list[dict[str, str]],
     *,
     label: str = "other",
-    state: "AgentState | None" = None,
+    state: AgentState | None = None,
 ) -> dict[str, Any]:
     """Call the model and parse a JSON object out of the response.
 
@@ -286,7 +286,7 @@ async def _chat_json(
 @traceable(run_type="llm", name="classify_intent")
 async def classify_intent(
     customer_message_redacted: str,
-    state: "AgentState | None" = None,
+    state: AgentState | None = None,
 ) -> ClassificationResult:
     data = await _chat_json(
         [
@@ -307,7 +307,7 @@ async def draft_response(
     customer_history: list[dict[str, Any]],
     policy_quotes: list[str],
     rejection_reason: str | None = None,
-    state: "AgentState | None" = None,
+    state: AgentState | None = None,
 ) -> DraftResult:
     user_block: dict[str, Any] = {
         "customer_message": customer_message_redacted,
@@ -334,7 +334,7 @@ async def draft_response(
 async def summarize_context_changes(
     old_snapshot: dict[str, Any],
     new_snapshot: dict[str, Any],
-    state: "AgentState | None" = None,
+    state: AgentState | None = None,
 ) -> ContextDelta:
     data = await _chat_json(
         [

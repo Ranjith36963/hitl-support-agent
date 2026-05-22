@@ -75,6 +75,7 @@ from eval.evaluators import (  # noqa: E402
     intent_accuracy,
     response_quality,
 )
+from mcp_server.support_read import search_kb  # noqa: E402
 from src.graph import async_sqlite_checkpointer, compile_full_with_checkpointer  # noqa: E402
 from src.llm import ClassificationResult, DraftResult  # noqa: E402
 from src.mcp_client import (  # noqa: E402
@@ -86,7 +87,6 @@ from src.mcp_client import (  # noqa: E402
     SlackUpdateResult,
 )
 from src.state import initial_state  # noqa: E402
-from mcp_server.support_read import search_kb  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Fake MCPClientRouter -- same shape as tests/test_integration_smoke.py::_fake_router()
@@ -519,7 +519,8 @@ async def _run_all(
     results_dir = Path(__file__).parent
     stem = f"results_{dataset_label}_{version_label}"
     json_path = results_dir / f"{stem}.json"
-    with open(json_path, "w", encoding="utf-8") as f:
+    # noqa: ASYNC230 — eval-harness, not the hot path. Blocking write is fine.
+    with open(json_path, "w", encoding="utf-8") as f:  # noqa: ASYNC230
         json.dump(metrics, f, indent=2, default=str)
     print(f"[eval] json written -> {json_path}")
 

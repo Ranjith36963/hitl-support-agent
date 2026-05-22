@@ -8,8 +8,9 @@ Matches the detailed Mermaid flow in docs/architecture.md:
 - Stale-context loopback to Draft
 """
 import os
+
 import matplotlib.pyplot as plt
-from matplotlib.patches import FancyBboxPatch, FancyArrowPatch, Polygon
+from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Polygon
 
 fig, ax = plt.subplots(figsize=(14, 19), dpi=110)
 ax.set_xlim(0, 100)

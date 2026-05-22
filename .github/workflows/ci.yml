@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-flight runs on the same ref when a new commit lands.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: lint · types · tests · security
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Ruff (lint)
+        run: ruff check .
+
+      - name: Mypy (strict types on src + mcp_server)
+        # TEMPORARY: mypy was configured strict in pyproject.toml but never
+        # enforced by CI, so the codebase has accumulated ~19 strict-mode
+        # findings (no-any-return, union-attr, type-arg). `continue-on-error`
+        # lets us surface them in CI logs without blocking the pipeline; a
+        # follow-up commit removes this flag once each finding is fixed
+        # individually. Tracking in: rippling-soaring-sutherland.md, "mypy
+        # cleanup" task.
+        continue-on-error: true
+        run: mypy
+
+      - name: Pytest (unit + integration, mocked LLM)
+        env:
+          # Tests mock the LLM client; no real key is needed. Set empty to
+          # short-circuit any code path that probes for env.
+          OPENROUTER_API_KEY: ""
+          OPENAI_API_KEY: ""
+          LANGSMITH_TRACING: "false"
+        run: pytest -q
+
+      - name: Pip-audit (dependency CVEs)
+        # Fail-hard on any unresolved vuln. If a finding has no upgrade path,
+        # pin via a comment in requirements.txt and add --ignore-vuln here.
+        run: pip-audit --strict
+
+      - name: Bandit (static security scan on src + mcp_server)
+        # `-ll` raises the minimum severity reported. `-c pyproject.toml` picks
+        # up the [tool.bandit] config (exclude_dirs + skips).
+        run: bandit -r src mcp_server -ll -c pyproject.toml
