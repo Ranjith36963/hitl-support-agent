@@ -65,6 +65,12 @@ if str(_REPO_ROOT) not in sys.path:
 
 from langgraph.types import Command  # noqa: E402
 
+from eval.adversarial_dataset import ADVERSARIAL_TICKETS  # noqa: E402
+from eval.adversarial_evaluators import (  # noqa: E402
+    evaluate_adversarial,
+    render_adversarial_markdown,
+    serialise_for_json,
+)
 from eval.bitext_dataset import BITEXT_TICKETS, BITEXT_TICKETS_27  # noqa: E402
 from eval.dataset import EVAL_TICKETS, EvalTicket  # noqa: E402
 from eval.evaluators import (  # noqa: E402
@@ -456,7 +462,18 @@ async def _run_all(
             print(f"    {r.ticket.ticket_id}: {(r.error or '')[:120]}")
         print()
 
-    # --- Compute metrics ---
+    # --- Adversarial path: pass/fail per ticket, no aggregate % ---
+    # Branches BEFORE the standard accuracy/safety metrics — those don't apply
+    # to adversarial tickets (no expected_intent ground truth, etc.).
+    if dataset_label == "adversarial":
+        await _write_adversarial_results(
+            results=results,
+            dataset_label=dataset_label,
+            version_label=version_label,
+        )
+        return
+
+    # --- Compute standard accuracy/safety metrics ---
     intent_acc = intent_accuracy(results)
     esc_prec = escalation_precision(results)
     fasr = false_auto_send_rate(results)
@@ -548,6 +565,71 @@ async def _run_all(
     if total_run_cost_usd > 0:
         print(
             f"         cost: ${total_run_cost_usd:.4f} total · "
+            f"${cost_per_ticket_avg:.4f}/ticket · {total_run_tokens:,} tokens"
+        )
+
+
+async def _write_adversarial_results(
+    results: list[EvalResult],
+    dataset_label: str,
+    version_label: str,
+) -> None:
+    """Write the adversarial pass/fail grid + summary instead of the standard
+    accuracy/safety metrics. Adversarial tickets don't have meaningful
+    expected_intent ground truth — pass/fail per ticket is the right report.
+    """
+    checks = evaluate_adversarial(results)
+    total = len(checks)
+    passed = sum(1 for c in checks if c.passed)
+
+    total_run_tokens = sum(r.total_tokens for r in results)
+    total_run_cost_usd = sum(r.total_cost_usd for r in results)
+    cost_per_ticket_avg = (
+        total_run_cost_usd / len(results) if results else 0.0
+    )
+
+    metrics: dict[str, Any] = {
+        "run_timestamp": datetime.now(UTC).isoformat(),
+        "mode": "real-llm",
+        "dataset": dataset_label,
+        "version": version_label,
+        "ticket_count": total,
+        "adversarial_passed_count": passed,
+        "adversarial_total": total,
+        "total_run_tokens": total_run_tokens,
+        "total_run_cost_usd": round(total_run_cost_usd, 6),
+        "cost_per_ticket_avg_usd": round(cost_per_ticket_avg, 6),
+        "adversarial": serialise_for_json(checks),
+    }
+
+    results_dir = Path(__file__).parent
+    stem = f"results_{dataset_label}_{version_label}"
+    json_path = results_dir / f"{stem}.json"
+    with open(json_path, "w", encoding="utf-8") as f:  # noqa: ASYNC230
+        json.dump(metrics, f, indent=2, default=str)
+    print(f"[eval] json written -> {json_path}")
+
+    md_path = results_dir / f"{stem}.md"
+    md_path.write_text(
+        render_adversarial_markdown(checks, version=version_label),
+        encoding="utf-8",
+    )
+    print(f"[eval] md written   -> {md_path}")
+
+    # Per-category pass/total summary (deliberately not a single %).
+    by_cat: dict[str, list[bool]] = {}
+    for c in checks:
+        by_cat.setdefault(c.category, []).append(c.passed)
+    print()
+    print("Per-category pass counts (read each row — no aggregate):")
+    for cat in sorted(by_cat):
+        outcomes = by_cat[cat]
+        ok = sum(1 for o in outcomes if o)
+        print(f"  {cat:<24} {ok}/{len(outcomes)}")
+
+    if total_run_cost_usd > 0:
+        print(
+            f"\ncost: ${total_run_cost_usd:.4f} total · "
             f"${cost_per_ticket_avg:.4f}/ticket · {total_run_tokens:,} tokens"
         )
 
@@ -717,14 +799,16 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--dataset",
-        choices=["curated", "bitext", "bitext27"],
+        choices=["curated", "bitext", "bitext27", "adversarial"],
         default="curated",
         help=(
             "Which eval set to run. 'curated' = 10 hand-written tickets "
             "(eval/dataset.py). 'bitext' = 10 real Bitext rows, SaaS-mappable "
             "intents (data/bitext_eval_10.csv). 'bitext27' = all 27 Bitext "
-            "intents, one ticket each (data/bitext_eval_27.csv). Both bitext "
-            "sets are live-LLM only."
+            "intents, one ticket each (data/bitext_eval_27.csv). 'adversarial' "
+            "= 25 hand-crafted hostile tickets across 5 categories "
+            "(eval/adversarial_dataset.py) — outputs a per-ticket pass/fail "
+            "grid, NOT an aggregate %. All non-curated sets are live-LLM only."
         ),
     )
     parser.add_argument(
@@ -778,15 +862,20 @@ def main() -> None:
 
     version_label = "v4" if os.environ.get("MULTIAGENT_ENABLED") == "1" else "v3"
 
-    if args.dataset in ("bitext", "bitext27"):
+    if args.dataset in ("bitext", "bitext27", "adversarial"):
         if args.no_llm:
             print(
-                "ERROR: --dataset bitext/bitext27 requires live LLM. Bitext "
-                "tickets carry no canned data. Drop --no-llm and set "
-                "OPENROUTER_API_KEY."
+                f"ERROR: --dataset {args.dataset} requires live LLM. These "
+                "tickets carry no canned data. Drop --no-llm and set the "
+                "active provider's API key."
             )
             sys.exit(1)
-        tickets = BITEXT_TICKETS if args.dataset == "bitext" else BITEXT_TICKETS_27
+        if args.dataset == "bitext":
+            tickets = BITEXT_TICKETS
+        elif args.dataset == "bitext27":
+            tickets = BITEXT_TICKETS_27
+        else:  # adversarial
+            tickets = ADVERSARIAL_TICKETS
     else:
         tickets = EVAL_TICKETS
 
