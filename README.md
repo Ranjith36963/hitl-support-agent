@@ -58,7 +58,7 @@ inbound Gmail (IMAP IDLE)
 10. **Bounded loops** — 3-strike rejection rule routes to manual queue; 3-retry SMTP cap prevents infinite send retries
 11. **Stale-context revalidation** — on long approval pauses (>15 min), context is re-fetched, hash-compared, and a delta panel is posted to Slack so the approver re-decides with fresh info instead of a silent stale send
 12. **Durable resume across process restart** — kill the server mid-pause, restart it; the SQLite checkpointer survives, the Slack message buttons still resume on the right `slack_message_ts`
-13. **Production-readiness layer** — three-tier eval (behavior contracts / empirical with bootstrap CIs / adversarial pass-fail grid), STRIDE threat model with mitigation citing real file paths, GitHub Actions CI (ruff + mypy + pytest + pip-audit + bandit), `/metrics` Prometheus endpoint, per-ticket cost telemetry. Methodology + gaps led not buried — see [`eval/METHODOLOGY.md`](./eval/METHODOLOGY.md) and [`docs/threat_model.md`](./docs/threat_model.md)
+13. **Production-readiness layer** — three-tier eval (behavior contracts / empirical with bootstrap CIs / adversarial pass-fail grid), STRIDE threat model with mitigation citing real file paths, GitHub Actions CI (ruff + mypy + pytest + pip-audit + bandit), `/metrics` Prometheus endpoint + **`docker compose up` brings a Grafana dashboard live at `localhost:3000`** (see [`deploy/README.md`](./deploy/README.md)), per-ticket cost telemetry. Methodology + gaps led not buried — see [`eval/METHODOLOGY.md`](./eval/METHODOLOGY.md) and [`docs/threat_model.md`](./docs/threat_model.md)
 
 ## Tech stack
 

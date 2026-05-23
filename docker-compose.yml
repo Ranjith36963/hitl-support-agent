@@ -1,0 +1,79 @@
+# Local observability stack — FastAPI app + Prometheus + Grafana.
+#
+# Bring it up:    docker compose up
+# Then:           open http://localhost:3000 (Grafana, anonymous viewer)
+#                 open http://localhost:9090 (Prometheus, scrape config + query)
+#                 open http://localhost:8000/metrics (raw exposition)
+#                 open http://localhost:8000/health (health check)
+#
+# Honest scope: this is a demo deploy, NOT production-grade.
+#   - No TLS termination, no auth on Grafana, no Prometheus persistence
+#     beyond the container's lifetime.
+#   - Real production would put this behind nginx + auth + persistent
+#     volumes + alertmanager + a Grafana provisioned dashboards repo.
+#   - The point of this stack: a recruiter / reviewer can `docker compose up`
+#     and see the metrics rendering live without spinning up infra.
+
+services:
+  hitl-agent:
+    build: .
+    image: hitl-support-agent:local
+    container_name: hitl-agent
+    # HOST=0.0.0.0 overrides the safer loopback default in src/config.py.
+    # Container networking requires binding to all interfaces inside the
+    # container; the host port mapping below is what's actually exposed.
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8000"
+      # Pull all other secrets/config from .env on the host. Containers
+      # without these (.env not present, or running on CI) still come up
+      # and serve /metrics + /health — the LLM endpoints will 401 until
+      # keys are provided.
+      MULTIAGENT_ENABLED: "${MULTIAGENT_ENABLED:-1}"
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: hitl-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=1d"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      - hitl-agent
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: hitl-grafana
+    environment:
+      # Anonymous viewer access for the portfolio demo. NOT for prod.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_USERS_DEFAULT_THEME: "dark"
+      # Suppress the "update available" banner in the demo.
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped

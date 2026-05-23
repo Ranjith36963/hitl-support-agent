@@ -1,0 +1,26 @@
+# Keep the image small + secrets out of it.
+.env
+.env.*
+!.env.example
+.git
+.github
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+htmlcov
+.coverage
+*.sqlite
+data/checkpoints.sqlite
+eval/results_*.json
+eval/results_*.md
+eval/_*.log
+deploy/grafana/data
+docs/superpowers
+*.md
+!README.md
+!CLAUDE.md
+!docs/threat_model.md
+!docs/architecture.md
+!eval/METHODOLOGY.md
