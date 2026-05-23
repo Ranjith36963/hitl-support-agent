@@ -45,6 +45,7 @@ from src.mcp_client import (
     SlackPostParams,
     SlackUpdateParams,
 )
+from src.metrics import timed_node
 from src.pii import (
     clear_ticket as _pii_clear_ticket,
 )
@@ -248,6 +249,7 @@ def pii_redact_node(state: AgentState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+@timed_node("classify_intent")
 async def classify_intent_node(state: AgentState) -> dict[str, Any]:
     result = await classify_intent(state["customer_message"], state=state)
     return {
@@ -274,6 +276,7 @@ async def classify_intent_node(state: AgentState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+@timed_node("enrich_context")
 async def enrich_context_node(state: AgentState) -> dict[str, Any]:
     client = _client()
     customer_email = _customer_email_from_audit(state)
@@ -353,6 +356,7 @@ def _customer_email_from_audit(state: AgentState) -> str:
 # ---------------------------------------------------------------------------
 
 
+@timed_node("draft_response")
 async def draft_response_node(state: AgentState) -> dict[str, Any]:
     profile = _last_profile_from_audit(state)
     history = state.get("customer_history") or []
@@ -454,6 +458,7 @@ def channel_router_node(state: AgentState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+@timed_node("slack_notification")
 async def slack_notification_node(state: AgentState) -> dict[str, Any]:
     """Posts the Block Kit approval message BEFORE the interrupt. Saves
     `slack_message_ts` so resume targets the same message even after a
@@ -591,6 +596,7 @@ def reject_increment_node(state: AgentState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+@timed_node("revalidate_context")
 async def revalidate_context_node(state: AgentState) -> dict[str, Any]:
     client = _client()
     customer_email = _customer_email_from_audit(state)
@@ -621,6 +627,7 @@ def route_after_revalidate(state: AgentState) -> str:
 # ---------------------------------------------------------------------------
 
 
+@timed_node("summarize_changes")
 async def summarize_changes_node(state: AgentState) -> dict[str, Any]:
     old_snapshot: dict[str, Any] = {
         "customer_tier": state.get("customer_tier", ""),
@@ -703,6 +710,7 @@ def finalize_action_node(state: AgentState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+@timed_node("send_email")
 async def send_email_node(state: AgentState) -> dict[str, Any]:
     # App-layer idempotency #1: state already says it's sent.
     if state.get("sent_message_id"):
@@ -808,6 +816,7 @@ def route_after_send(state: AgentState) -> str:
 # ---------------------------------------------------------------------------
 
 
+@timed_node("audit_log")
 async def audit_log_node(state: AgentState) -> dict[str, Any]:
     """Final close-out. Append-only audit entry + best-effort Slack update.
 
@@ -844,6 +853,7 @@ async def audit_log_node(state: AgentState) -> dict[str, Any]:
     }
 
 
+@timed_node("manual_queue")
 async def manual_queue_node(state: AgentState) -> dict[str, Any]:
     max_rej = int(os.environ.get("MAX_HUMAN_REJECTIONS", "3"))
     if state.get("send_status") == "failed_manual":

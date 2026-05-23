@@ -25,7 +25,7 @@ from langsmith import traceable
 from src.agents.base import build_handoff_metadata, get_llm, get_model_id, load_prompt
 from src.agents.critic import critic_node
 from src.llm import track_llm_usage
-from src.metrics import LLM_LATENCY
+from src.metrics import LLM_LATENCY, timed_node
 from src.state import AgentState
 
 # Loop cap. The route condition is `iteration < MAX_CRITIC_ITERATIONS - 1`,
@@ -67,6 +67,7 @@ async def _llm_draft(
     return parsed
 
 
+@timed_node("drafter")
 @traceable(run_type="chain", name="drafter_agent")
 async def drafter_node(state: AgentState) -> dict[str, Any]:
     """Write (or rewrite) the draft. Picks up Critic feedback if present."""

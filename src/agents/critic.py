@@ -23,7 +23,7 @@ from langsmith import traceable
 
 from src.agents.base import build_handoff_metadata, get_llm, get_model_id, load_prompt
 from src.llm import track_llm_usage
-from src.metrics import LLM_LATENCY
+from src.metrics import LLM_LATENCY, timed_node
 from src.state import AgentState
 
 _CRITIC_PROMPT = load_prompt("critic_system")
@@ -76,6 +76,7 @@ async def _llm_judge(
         }
 
 
+@timed_node("critic")
 @traceable(run_type="chain", name="critic_agent")
 async def critic_node(state: AgentState) -> dict[str, Any]:
     """Audit the current draft and adjust draft_confidence accordingly.

@@ -26,6 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langsmith import traceable
 
 from src.agents.base import build_handoff_metadata, get_client
+from src.metrics import timed_node
 from src.state import AgentState
 
 
@@ -75,6 +76,7 @@ def _hash_context(payload: Any) -> str:
     return hashlib.sha256(blob).hexdigest()
 
 
+@timed_node("researcher")
 @traceable(run_type="chain", name="researcher_agent")
 async def research_node(state: AgentState) -> dict[str, Any]:
     """The Researcher's single graph node — intent-routed tool selection."""
