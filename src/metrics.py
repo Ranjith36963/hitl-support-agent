@@ -139,13 +139,28 @@ def _TEST_RESET() -> None:
     custom CollectorRegistry per test (verbose).
 
     Labeled metrics keep per-label samples in `_metrics`. Unlabeled
-    metrics (E2E_LATENCY) keep samples directly on the metric object.
-    We handle both.
+    metrics (E2E_LATENCY) keep samples directly on the wrapper object
+    via `_sum` / `_count` / `_buckets`. We handle both.
     """
     for metric in (TICKETS_TOTAL, NODE_ERRORS, LLM_TOKENS,
                    NODE_LATENCY, E2E_LATENCY, LLM_LATENCY):
+        # Labeled-metric path: clear the per-label-tuple sample dict.
+        # We always attempt this; for unlabeled metrics the dict is empty.
         if hasattr(metric, "_metrics"):
             metric._metrics.clear()  # type: ignore[attr-defined]
+        # Unlabeled-metric path: prometheus_client stores accumulators
+        # directly on the wrapper. Counter has `_value`; Histogram has
+        # `_sum` + `_buckets`. The public `clear()` method errors on
+        # unlabeled metrics in prometheus_client≥0.21 (missing _lock),
+        # so we reset the private state directly. Test-only path; the
+        # coupling is acceptable.
+        if hasattr(metric, "_value"):
+            metric._value.set(0)  # type: ignore[attr-defined]
+        if hasattr(metric, "_sum"):
+            metric._sum.set(0)  # type: ignore[attr-defined]
+        if hasattr(metric, "_buckets"):
+            for bucket in metric._buckets:  # type: ignore[attr-defined]
+                bucket.set(0)
 
 
 __all__ = [

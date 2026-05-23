@@ -81,3 +81,26 @@ def test_llm_latency_observes() -> None:
     # in src/llm.py and src/agents/{drafter,critic}.py depends on this shape.
     LLM_LATENCY.labels(call="classify").observe(0.5)
     assert LLM_LATENCY.labels(call="classify")._sum.get() == pytest.approx(0.5, abs=1e-6)
+
+
+def test_e2e_latency_unlabeled_resets_cleanly() -> None:
+    """Regression test for the _TEST_RESET docstring promise.
+
+    `E2E_LATENCY` is the one unlabeled histogram. The original `_TEST_RESET`
+    only iterated `metric._metrics.clear()` — which silently skipped this
+    metric because unlabeled histograms keep state on `_sum` / `_count` /
+    `_buckets` directly. The fix resets those wrappers too. This test would
+    have caught the bug if it had existed first.
+    """
+    from src.metrics import E2E_LATENCY
+
+    E2E_LATENCY.observe(1.0)
+    E2E_LATENCY.observe(2.0)
+    assert E2E_LATENCY._sum.get() == pytest.approx(3.0, abs=1e-6)
+    # The bucket that catches `1.0` (or higher) is incremented; cumulative
+    # observation count is encoded across `_buckets`, not on a `_count` attr.
+    assert any(b.get() > 0 for b in E2E_LATENCY._buckets)
+
+    _TEST_RESET()
+    assert E2E_LATENCY._sum.get() == 0.0
+    assert all(b.get() == 0.0 for b in E2E_LATENCY._buckets)

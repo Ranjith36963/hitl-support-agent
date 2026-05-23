@@ -384,6 +384,8 @@ send_retry_count: int                # increments on each transient send failure
 | `MAX_SEND_RETRIES` | 3 | Transient-failure retry cap before `failed_manual` |
 | `SLA_DEADLINE_HOURS` | 24 | Hours of human silence before SLA expires to Manual Queue |
 | `IMAP_POLL_INTERVAL_SEC` | 30 | Polling fallback when IMAP IDLE is unavailable |
+| `HOST` | `127.0.0.1` | FastAPI bind address. Loopback by default (bandit B104 safer default for dev). **Production / container deploys must set `HOST=0.0.0.0` explicitly** to accept external traffic. See `docs/threat_model.md` row A5. |
+| `PORT` | `8000` | FastAPI bind port. |
 
 ## LangSmith tagging
 

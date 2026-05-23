@@ -642,22 +642,32 @@ async def _run_with_reps(
     No retries here — if a single rep fails partway, the noise summary will be
     over fewer reps. Honest behaviour: do not invent missing data.
     """
+    # Track which rep INDICES actually produced a readable JSON. A failure
+    # mid-loop (rate limit, network blip, OOM) means the rep_files list and
+    # the loaded metrics must agree on which rep produced which file —
+    # otherwise the noise summary cites filenames that don't exist on disk.
+    successful_reps: list[int] = []
     per_rep_metrics: list[dict[str, Any]] = []
     for i in range(1, n_reps + 1):
         rep_label = f"{dataset_label}_rep{i}"
         print(f"\n[eval] === noise-floor rep {i}/{n_reps} ===")
-        await _run_all(
-            no_llm=no_llm,
-            tickets=tickets,
-            dataset_label=rep_label,
-            version_label=version_label,
-            ticket_delay_sec=ticket_delay_sec,
-        )
+        try:
+            await _run_all(
+                no_llm=no_llm,
+                tickets=tickets,
+                dataset_label=rep_label,
+                version_label=version_label,
+                ticket_delay_sec=ticket_delay_sec,
+            )
+        except Exception as exc:  # noqa: BLE001 — one rep failing must not crash the noise summary
+            print(f"[eval] rep {i} crashed: {exc}; continuing.")
+            continue
         # Read the rep's JSON back so we have the metric numbers.
         rep_path = Path(__file__).parent / f"results_{rep_label}_{version_label}.json"
         if rep_path.exists():
             with open(rep_path, encoding="utf-8") as f:  # noqa: ASYNC230
                 per_rep_metrics.append(json.load(f))
+            successful_reps.append(i)
 
     if not per_rep_metrics:
         print("[eval] no rep metrics captured — aborting noise summary.")
@@ -674,10 +684,11 @@ async def _run_with_reps(
     summary: dict[str, Any] = {
         "dataset": dataset_label,
         "version": version_label,
-        "n_reps": len(per_rep_metrics),
+        "n_reps_requested": n_reps,
+        "n_reps_succeeded": len(per_rep_metrics),
         "rep_files": [
-            f"results_{dataset_label}_rep{i + 1}_{version_label}.json"
-            for i in range(len(per_rep_metrics))
+            f"results_{dataset_label}_rep{i}_{version_label}.json"
+            for i in successful_reps
         ],
         "per_metric_mean_std": {},
     }
