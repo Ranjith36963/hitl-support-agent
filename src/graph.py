@@ -170,24 +170,32 @@ def build_full_graph_builder() -> StateGraph[AgentState]:
     #
     # BOTH PATHS RETAINED INTENTIONALLY — do NOT delete the v3 path.
     # The v3-vs-v4 head-to-head IS the deliverable, not a stepping stone.
-    # The head-to-head eval found v4 did NOT beat v3. A refreshed 10-ticket
-    # live run (eval/results_curated_v3.json vs results_curated_v4.json) ties
-    # on every metric except response quality, where v3 is ahead; a real
-    # 10-ticket Bitext run (eval/bitext_findings.md) reached the same tie.
-    # The Critic is structurally one-directional: it can only LOWER
-    # draft_confidence, so v4 escalates >= v3 always and cannot beat a v3
-    # already at 100% escalation precision. See discussion.md for the audit.
     #
-    # Consequences for this flag:
-    #   - Default stays MULTIAGENT_ENABLED=0 (v3) — the default must reflect
-    #     the measured-best path, and v3 won.
-    #   - Do NOT flip the default to v4 or delete the v3 nodes. Promoting the
-    #     version that lost the eval would turn an honest result into a quiet
-    #     misrepresentation.
-    #   - Keeping v3 costs almost nothing (two node functions); the honest
-    #     A/B comparison is worth far more than the small cleanup saving.
+    # History of this default:
+    # - Through 2026-05-21: default = v3. The 10-ticket curated + 10-ticket
+    #   Bitext evals tied on every safety metric, and v3 was ahead on
+    #   response_quality. Default reflected the measured-best path.
+    # - 2026-05-22: the 27-intent Bitext breadth eval ran. v3 produced 6
+    #   dangerous false auto-sends (invoice queries, order tracking,
+    #   change_shipping_address). v4 caught 5 of those 6, leaving only 1.
+    #   See eval/bitext27_findings.md.
+    # - 2026-05-22: 25-ticket adversarial red-team set ran. v3 = 18/25, v4 =
+    #   21/25 — v4 catches 3 more classifier_trap cases. See
+    #   eval/results_adversarial_v3.md vs _v4.md.
+    # - 2026-05-23: default flipped to MULTIAGENT_ENABLED=1 (v4). The newer
+    #   data shows v4 is materially safer on the harder distributions; the
+    #   trade-offs (~2× cost per ticket, more conservative escalation on
+    #   simple FAQs) are documented in METHODOLOGY.md and accepted.
+    #
+    # The Critic is structurally one-directional: it can only LOWER
+    # draft_confidence, so v4 escalates >= v3 always. That is the mechanism
+    # by which v4 catches v3's dangerous auto-sends; it is also why v4
+    # over-escalates some benign FAQs.
+    #
+    # Keeping v3 costs almost nothing (two node functions); set
+    # MULTIAGENT_ENABLED=0 to recover the baseline path for direct comparison.
     import os as _os
-    _MULTIAGENT = _os.environ.get("MULTIAGENT_ENABLED", "0") == "1"
+    _MULTIAGENT = _os.environ.get("MULTIAGENT_ENABLED", "1") == "1"
 
     # --- nodes ---
     builder.add_node("pii_redact", pii_redact_node)

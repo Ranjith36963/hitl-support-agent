@@ -1033,10 +1033,11 @@ def main() -> None:
     if args.multiagent is None:
         if "MULTIAGENT_ENABLED" not in os.environ:
             print(
-                "[eval] MULTIAGENT_ENABLED not set — defaulting to v3 mode. "
-                "Pass --multiagent or --no-multiagent to be explicit."
+                "[eval] MULTIAGENT_ENABLED not set — defaulting to v4 multi-agent "
+                "(safer on hard cases per eval/bitext27_findings.md). Pass "
+                "--multiagent / --no-multiagent to be explicit."
             )
-            os.environ["MULTIAGENT_ENABLED"] = "0"
+            os.environ["MULTIAGENT_ENABLED"] = "1"
         else:
             inherited = os.environ["MULTIAGENT_ENABLED"]
             print(

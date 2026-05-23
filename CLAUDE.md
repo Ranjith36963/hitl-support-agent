@@ -5,10 +5,10 @@
 ## Project state — v4 multi-agent shipped behind feature flag
 
 - **v3** (single-agent) and **v4** (multi-agent: Researcher + Drafter↔Critic) both live in the codebase.
-- Toggle: `MULTIAGENT_ENABLED=1` enables v4. Default 0 keeps v3 path.
-- **Both paths retained intentionally** — the v3↔v4 head-to-head IS the deliverable. v4 did NOT beat v3: they tie on the safety metric, v3 is ahead on escalation precision (100% vs 90%). v3 stays the default. Not scheduled for removal — see comment in `src/graph.py` and the full audit in `discussion.md`.
-- Live LLM eval results: both modes hold `false_auto_send_rate = 0%` on the 10-ticket hand-curated eval set AND on the 10-ticket real Bitext eval. Real numbers in `README.md` v4 section and `eval/bitext_findings.md`.
-- Tests: 136/136 passing in both flag modes.
+- Toggle: `MULTIAGENT_ENABLED=1` enables v4 (**default since 2026-05-23**). `=0` keeps v3 path for direct comparison.
+- **Both paths retained intentionally** — the v3↔v4 head-to-head IS the deliverable. On the 10-ticket curated + 10-ticket Bitext eval sets v3 and v4 tied; on the 27-intent breadth eval and 25-ticket adversarial set **v4 caught 5/6 dangerous false auto-sends v3 missed** and 3 more classifier_trap cases — that's what drove the default flip. Trade-off: v4 ~2× cost/ticket and over-escalates some simple FAQs. Full audit in `eval/bitext27_findings.md` + `discussion.md`.
+- Live LLM eval results: both modes hold `false_auto_send_rate = 0%` on the 10-ticket curated + 10-ticket Bitext sets. Both FAIL safety on bitext27 (v3=54.5%, v4=50% of auto-sends wrong — small denominator; absolute count fell 6 → 1).
+- Tests: 143/143 passing in both flag modes. CI green on every PR.
 
 ## Source docs
 
