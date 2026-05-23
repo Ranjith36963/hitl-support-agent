@@ -63,8 +63,13 @@ async def startup() -> None:
         # we stamp on tickets and the mode the graph was actually compiled in
         # are guaranteed identical (they're both reading the same env value
         # microseconds apart). Frozen for the lifetime of this graph object.
+        # Default MUST match src/graph.py's read: both flipped to "1" on
+        # 2026-05-23. Diverging defaults silently mislabel v4 runs as v3 in
+        # LangSmith metadata + audit_log + Prometheus labels (ultrareview
+        # bug_011). If you flip one default, flip both — or extract this
+        # into a shared helper.
         import os as _os
-        _compiled_mode = "v4" if _os.environ.get("MULTIAGENT_ENABLED", "0") == "1" else "v3"
+        _compiled_mode = "v4" if _os.environ.get("MULTIAGENT_ENABLED", "1") == "1" else "v3"
 
         _checkpoint_stack = AsyncExitStack()
         await _checkpoint_stack.__aenter__()

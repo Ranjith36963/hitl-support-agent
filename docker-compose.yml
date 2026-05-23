@@ -30,9 +30,12 @@ services:
       # and serve /metrics + /health — the LLM endpoints will 401 until
       # keys are provided.
       MULTIAGENT_ENABLED: "${MULTIAGENT_ENABLED:-1}"
+    # Short-form env_file works on Docker Compose v1+ (the long-form
+    # `path:`/`required:` mapping needs Compose v2.24+ which not all distros
+    # ship by default — ultrareview merged_bug_003). Compose prints a
+    # warning if `.env` is missing and continues; same behaviour as required:false.
     env_file:
-      - path: .env
-        required: false
+      - .env
     ports:
       - "127.0.0.1:8000:8000"
     healthcheck:
@@ -55,7 +58,13 @@ services:
     ports:
       - "127.0.0.1:9090:9090"
     depends_on:
-      - hitl-agent
+      # Long-form: wait until hitl-agent's healthcheck passes before
+      # scraping. Short-form (`- hitl-agent`) only waits for the
+      # container to be STARTED, which races the FastAPI app's bind to
+      # port 8000 and shows DOWN in /targets for ~20-60s after boot
+      # (ultrareview merged_bug_003).
+      hitl-agent:
+        condition: service_healthy
     restart: unless-stopped
 
   grafana:
@@ -75,5 +84,9 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
-      - prometheus
+      # Prometheus boots fast and has no healthcheck declared; condition:
+      # service_started is the explicit equivalent of the prior list form
+      # and tolerates the lack of a healthcheck.
+      prometheus:
+        condition: service_started
     restart: unless-stopped

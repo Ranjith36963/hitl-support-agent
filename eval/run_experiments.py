@@ -556,7 +556,13 @@ async def _run_all(
             {
                 "ticket_id": r.ticket.ticket_id,
                 "description": r.ticket.description,
-                "customer_message_snippet": r.ticket.customer_message[:240],
+                # Full customer_message, not a snippet. eval/cross_judge.py
+                # re-judges drafts with a second model and MUST score the
+                # exact input the primary judge scored — otherwise the
+                # Pearson/kappa numbers conflate judge bias with input
+                # asymmetry (ultrareview merged_bug_013). The serialised
+                # JSON grows by a few KB per ticket; acceptable tradeoff.
+                "customer_message": r.ticket.customer_message,
                 "final_draft": r.final_draft,
                 "expected_intent": r.ticket.expected_intent,
                 "actual_intent": r.actual_intent,
@@ -790,15 +796,25 @@ def _write_results_md(
 ) -> None:
     """Render a markdown metrics table + per-ticket breakdown."""
 
+    # Derive the provider+model label from the active env so the markdown is
+    # always honest about what produced the numbers. The previous hardcode
+    # ("OpenRouter / DeepSeek V3") lied on every gpt-4o-mini run, including
+    # all the committed adversarial + bitext27 artifacts — ultrareview bug_015.
+    from src.llm import _model as _active_model  # local import — no cycle
+    _provider = (
+        "OpenAI" if os.environ.get("LLM_PROVIDER", "").lower() == "openai"
+        else "OpenRouter"
+    )
     mode_note = (
         "**Mode: `--no-llm` (deterministic, no LLM credentials provisioned)**\n\n"
         "Canned classifications drive the routing decisions. This proves the harness "
         "wiring -- gate routing, channel assignment, resume flow -- without needing "
-        "OpenRouter access.\n\n"
-        "Real metrics will be filled in once `OPENROUTER_API_KEY` is set and "
-        "`python -m eval.run_experiments` is run without `--no-llm`."
+        "any LLM provider access.\n\n"
+        "Real metrics fill in once the provider key is set (OPENAI_API_KEY or "
+        "OPENROUTER_API_KEY) and `python -m eval.run_experiments` is run without "
+        "`--no-llm`."
         if no_llm
-        else "**Mode: real LLM (OpenRouter / DeepSeek V3)**"
+        else f"**Mode: real LLM ({_provider} / `{_active_model()}`)**"
     )
 
     fasr = metrics["false_auto_send_rate"]

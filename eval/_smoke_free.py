@@ -1,4 +1,9 @@
-"""Smoke test: can we call OpenRouter `:free`-suffix DeepSeek V3 right now?
+"""Smoke test: can we call an OpenRouter `:free`-suffix DeepSeek variant right now?
+
+The original DeepSeek V3 `:free` tier (deepseek/deepseek-chat:free) was
+retired by OpenRouter; the live probe in this script targets the newer
+`deepseek/deepseek-v4-flash:free` variant — verify the current id with
+`python -m eval._list_free_models` before pinning.
 
 Two things this answers in one shot:
   1. Does the call route at all (200) when our paid balance is negative?
@@ -9,10 +14,9 @@ effects. Run from repo root:
 
     python -m eval._smoke_free
 
-The model ID is hard-coded to the `:free` variant here — this script is
-deliberately a one-off probe and does NOT mutate `.env` or `OPENROUTER_MODEL`.
-If it works, the next step is a normal eval run with `OPENROUTER_MODEL`
-exported in the shell.
+The model ID is hard-coded here — this script is deliberately a one-off
+probe and does NOT mutate `.env` or `OPENROUTER_MODEL`. If it works, the
+next step is a normal eval run with `OPENROUTER_MODEL` exported in the shell.
 """
 
 from __future__ import annotations

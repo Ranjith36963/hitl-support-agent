@@ -90,6 +90,16 @@ async def main() -> int:
         help="Model id used as the alternative judge (default: gpt-4o).",
     )
     parser.add_argument(
+        "--primary-judge-model",
+        default=None,
+        help=(
+            "Model id that produced the primary scores in the input JSON. "
+            "Honest labelling only — does not affect computation. If omitted, "
+            "falls back to the current LLM_PROVIDER env (not always correct "
+            "if you've changed the env since the eval; ultrareview merged_bug_013)."
+        ),
+    )
+    parser.add_argument(
         "--output",
         default=None,
         help="Output JSON path. Default: eval/cross_judge_<input stem>.json",
@@ -113,11 +123,23 @@ async def main() -> int:
     primary_judge_per_ticket = data.get("response_quality_details", {}).get(
         "per_ticket", []
     )
-    primary_judge_model = (
-        os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
-        if os.environ.get("LLM_PROVIDER", "").lower() == "openai"
-        else os.environ.get("OPENROUTER_MODEL", "deepseek/deepseek-chat")
-    )
+    # Explicit flag wins; otherwise fall back to current-env best-guess and
+    # emit a warning. The current-env fallback is correct-by-coincidence
+    # only when the operator hasn't changed env between the eval run and
+    # this script (ultrareview merged_bug_013).
+    if args.primary_judge_model:
+        primary_judge_model = args.primary_judge_model
+    else:
+        primary_judge_model = (
+            os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+            if os.environ.get("LLM_PROVIDER", "").lower() == "openai"
+            else os.environ.get("OPENROUTER_MODEL", "deepseek/deepseek-chat")
+        )
+        print(
+            f"[cross_judge] --primary-judge-model not provided; guessing "
+            f"{primary_judge_model!r} from current env. Pass --primary-judge-model "
+            f"explicitly for honest labelling."
+        )
     primary_by_ticket = {p["ticket_id"]: p for p in primary_judge_per_ticket}
 
     # Re-judge every per-ticket entry that has a final_draft we can score.
@@ -145,15 +167,34 @@ async def main() -> int:
         return 1
 
     drafts_by_ticket: dict[str, dict[str, str]] = {}
+    truncated_input_seen = False
     for row in data.get("per_ticket", []):
         ticket_id = row.get("ticket_id")
         draft = row.get("final_draft")
-        msg = row.get("customer_message_snippet") or row.get("customer_message", "")
+        # Prefer the FULL customer_message field added by run_experiments
+        # post-ultrareview merged_bug_013. Older result JSONs only carried
+        # customer_message_snippet (first 240 chars) — fall back to that
+        # but warn loudly: scoring a 240-char snippet against the primary
+        # judge that saw the full text conflates judge bias with input
+        # asymmetry, so any kappa from such a run is methodologically suspect.
+        msg = row.get("customer_message")
+        if msg is None:
+            msg = row.get("customer_message_snippet", "")
+            if msg:
+                truncated_input_seen = True
         if ticket_id and draft:
             drafts_by_ticket[ticket_id] = {
                 "customer_message": msg,
                 "final_draft": draft,
             }
+
+    if truncated_input_seen:
+        print(
+            "[cross_judge] WARNING: input JSON only carries customer_message_snippet "
+            "(first 240 chars), not full customer_message. The bias metrics below "
+            "may be affected by input-truncation asymmetry — re-run the underlying "
+            "eval on post-ultrareview run_experiments.py and retry for clean numbers."
+        )
 
     if not drafts_by_ticket:
         print(

@@ -1,28 +1,28 @@
 bitext_intent,category,instruction,project_intent,expected_outcome,mapping_rationale,split
-recover_password,ACCOUNT,can I reset the PIN of my user profile?,FAQ,auto_send,password reset â€” self-service FAQ,dev
-newsletter_subscription,SUBSCRIPTION,i try to unsubscribe to ur companu newsletter,FAQ,auto_send,newsletter management â€” FAQ,test
-check_payment_methods,PAYMENT,I try to list your available payment methoids,info,auto_send,which payment methods â€” factual info,dev
+recover_password,ACCOUNT,can I reset the PIN of my user profile?,FAQ,auto_send,password reset — self-service FAQ,dev
+newsletter_subscription,SUBSCRIPTION,i try to unsubscribe to ur companu newsletter,FAQ,auto_send,newsletter management — FAQ,test
+check_payment_methods,PAYMENT,I try to list your available payment methoids,info,auto_send,which payment methods — factual info,dev
 create_account,ACCOUNT,i have a problem with creating a freemium account,basic_technical,auto_send,account-creation how-to,dev
-edit_account,ACCOUNT,i have to edit my personal info,FAQ,auto_send,account-detail change â€” FAQ,test
-switch_account,ACCOUNT,switch to freemium account,FAQ,auto_send,account switching â€” FAQ,test
-delete_account,ACCOUNT,closing  platinum account,other,escalated,"account deletion â€” sensitive, escalate",test
-registration_problems,ACCOUNT,I need support with my sign-up,technical,escalated,signup is broken â€” technical,dev
-get_refund,REFUND,how do I get a compensation of my money?,refund,escalated,refund request â€” money,test
-check_refund_policy,REFUND,i do not know hoow i could check ur reimbursement policy,refund,escalated,refund-policy question â€” refund mention,test
-track_refund,REFUND,can I see if there is anything new on the reimbursement?,refund,escalated,refund status â€” refund mention,test
-payment_issue,PAYMENT,i cant make a payment where can i notify of an error,billing,escalated,payment failure â€” billing,test
-check_invoice,INVOICE,how can I locate the invoice #37777?,billing,escalated,invoice query â€” billing,dev
-get_invoice,INVOICE,i dont know what i need to do to download my bill #85632,billing,escalated,invoice request â€” billing,dev
-complaint,FEEDBACK,help me to file a claim,complaint,escalated,complaint â€” edge-case escalates,test
-review,FEEDBACK,uhave a method to leave an opinion about ur services,other,escalated,leaving a review â€” edge-case 'other',test
+edit_account,ACCOUNT,i have to edit my personal info,FAQ,auto_send,account-detail change — FAQ,test
+switch_account,ACCOUNT,switch to freemium account,FAQ,auto_send,account switching — FAQ,test
+delete_account,ACCOUNT,closing  platinum account,other,escalated,"account deletion — sensitive, escalate",test
+registration_problems,ACCOUNT,I need support with my sign-up,technical,escalated,signup is broken — technical,dev
+get_refund,REFUND,how do I get a compensation of my money?,refund,escalated,refund request — money,test
+check_refund_policy,REFUND,i do not know hoow i could check ur reimbursement policy,refund,escalated,refund-policy question — refund mention,test
+track_refund,REFUND,can I see if there is anything new on the reimbursement?,refund,escalated,refund status — refund mention,test
+payment_issue,PAYMENT,i cant make a payment where can i notify of an error,billing,escalated,payment failure — billing,test
+check_invoice,INVOICE,how can I locate the invoice #37777?,billing,escalated,invoice query — billing,dev
+get_invoice,INVOICE,i dont know what i need to do to download my bill #85632,billing,escalated,invoice request — billing,dev
+complaint,FEEDBACK,help me to file a claim,complaint,escalated,complaint — edge-case escalates,test
+review,FEEDBACK,uhave a method to leave an opinion about ur services,other,escalated,leaving a review — edge-case 'other',test
 contact_human_agent,CONTACT,"I do not understand you, help me chatting with someone",other,escalated,explicit human request,test
 contact_customer_service,CONTACT,I want help to speak to customer support,other,escalated,request to reach support,test
-cancel_order,ORDER,"I cannot pay for the last purchase I have made, cancel it",billing,escalated,order cancellation â€” money [e-commerce],test
-change_order,ORDER,i cant add some items to order370795561790,other,escalated,order change â€” no SaaS equivalent [e-commerce],test
-check_cancellation_fee,CANCEL,"I can't ifnd the bloody termination charge, I need help",billing,escalated,cancellation fee â€” money [e-commerce],test
-place_order,ORDER,"I have to order something, can I get some help?",other,escalated,placing an order â€” no SaaS equivalent [e-commerce],dev
-track_order,ORDER,checking order status,other,escalated,order tracking â€” no SaaS equivalent [e-commerce],test
-delivery_options,DELIVERY,could you help me check what delivery methods you offer?,info,auto_send,delivery options â€” info [e-commerce],test
-delivery_period,DELIVERY,need help seeing when my packageis going to arrive,info,auto_send,delivery timing â€” info [e-commerce],test
-change_shipping_address,SHIPPING,give me information about a delivery address modification,other,escalated,shipping address â€” no SaaS equivalent [e-commerce],test
-set_up_shipping_address,SHIPPING,error setting the shipping address up,other,escalated,shipping setup â€” no SaaS equivalent [e-commerce],test
+cancel_order,ORDER,"I cannot pay for the last purchase I have made, cancel it",billing,escalated,order cancellation — money [e-commerce],test
+change_order,ORDER,i cant add some items to order370795561790,other,escalated,order change — no SaaS equivalent [e-commerce],test
+check_cancellation_fee,CANCEL,"I can't ifnd the bloody termination charge, I need help",billing,escalated,cancellation fee — money [e-commerce],test
+place_order,ORDER,"I have to order something, can I get some help?",other,escalated,placing an order — no SaaS equivalent [e-commerce],dev
+track_order,ORDER,checking order status,other,escalated,order tracking — no SaaS equivalent [e-commerce],test
+delivery_options,DELIVERY,could you help me check what delivery methods you offer?,info,auto_send,delivery options — info [e-commerce],test
+delivery_period,DELIVERY,need help seeing when my packageis going to arrive,info,auto_send,delivery timing — info [e-commerce],test
+change_shipping_address,SHIPPING,give me information about a delivery address modification,other,escalated,shipping address — no SaaS equivalent [e-commerce],test
+set_up_shipping_address,SHIPPING,error setting the shipping address up,other,escalated,shipping setup — no SaaS equivalent [e-commerce],test

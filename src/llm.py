@@ -44,7 +44,10 @@ _PRICING: dict[str, tuple[float, float]] = {
     "gpt-4.1": (0.002, 0.008),
     # ---- OpenRouter (model_id verbatim) ----
     "deepseek/deepseek-chat": (0.00014, 0.00028),
-    "deepseek/deepseek-v4-flash": (0.0, 0.0),
+    # :free variants are billed at $0 by OpenRouter — only entry kept here
+    # since the paid v4-flash row was unverified against any OpenRouter
+    # pricing page (ultrareview bug_004). Unknown models fall through to
+    # (0.0, 0.0) anyway so cost telemetry stays sane regardless.
     "deepseek/deepseek-v4-flash:free": (0.0, 0.0),
     "anthropic/claude-3.5-haiku": (0.0008, 0.004),
     "meta-llama/llama-3.3-70b-instruct:free": (0.0, 0.0),

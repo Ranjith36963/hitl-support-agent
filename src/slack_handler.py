@@ -111,6 +111,14 @@ def _register_handlers(app: AsyncApp) -> None:
         await ack()
         thread_id = _thread_id_from_body(body)
         log.info("reject_button clicked: thread_id=%r", thread_id)
+        # Mirror on_approve's guard (ultrareview bug_007). Without this, a
+        # legacy/malformed Slack payload would open a modal whose
+        # private_metadata carries thread_id="" — the user fills it out, the
+        # submit handler calls _resume_graph(""), and the lower-layer guard
+        # silently no-ops with no warning, no audit, no surfaced error.
+        if not thread_id:
+            log.warning("reject_button: could not resolve thread_id from body — modal skipped")
+            return
         await client.views_open(
             trigger_id=body["trigger_id"],
             view=_reject_modal(thread_id),
@@ -121,6 +129,10 @@ def _register_handlers(app: AsyncApp) -> None:
         await ack()
         thread_id = _thread_id_from_body(body)
         log.info("edit_button clicked: thread_id=%r", thread_id)
+        # Same guard as on_approve / on_reject — see ultrareview bug_007.
+        if not thread_id:
+            log.warning("edit_button: could not resolve thread_id from body — modal skipped")
+            return
         original_draft = _draft_from_body(body)
         await client.views_open(
             trigger_id=body["trigger_id"],
