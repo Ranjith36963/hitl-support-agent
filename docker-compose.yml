@@ -1,0 +1,92 @@
+# Local observability stack — FastAPI app + Prometheus + Grafana.
+#
+# Bring it up:    docker compose up
+# Then:           open http://localhost:3000 (Grafana, anonymous viewer)
+#                 open http://localhost:9090 (Prometheus, scrape config + query)
+#                 open http://localhost:8000/metrics (raw exposition)
+#                 open http://localhost:8000/health (health check)
+#
+# Honest scope: this is a demo deploy, NOT production-grade.
+#   - No TLS termination, no auth on Grafana, no Prometheus persistence
+#     beyond the container's lifetime.
+#   - Real production would put this behind nginx + auth + persistent
+#     volumes + alertmanager + a Grafana provisioned dashboards repo.
+#   - The point of this stack: a recruiter / reviewer can `docker compose up`
+#     and see the metrics rendering live without spinning up infra.
+
+services:
+  hitl-agent:
+    build: .
+    image: hitl-support-agent:local
+    container_name: hitl-agent
+    # HOST=0.0.0.0 overrides the safer loopback default in src/config.py.
+    # Container networking requires binding to all interfaces inside the
+    # container; the host port mapping below is what's actually exposed.
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8000"
+      # Pull all other secrets/config from .env on the host. Containers
+      # without these (.env not present, or running on CI) still come up
+      # and serve /metrics + /health — the LLM endpoints will 401 until
+      # keys are provided.
+      MULTIAGENT_ENABLED: "${MULTIAGENT_ENABLED:-1}"
+    # Short-form env_file works on Docker Compose v1+ (the long-form
+    # `path:`/`required:` mapping needs Compose v2.24+ which not all distros
+    # ship by default — ultrareview merged_bug_003). Compose prints a
+    # warning if `.env` is missing and continues; same behaviour as required:false.
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: hitl-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=1d"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      # Long-form: wait until hitl-agent's healthcheck passes before
+      # scraping. Short-form (`- hitl-agent`) only waits for the
+      # container to be STARTED, which races the FastAPI app's bind to
+      # port 8000 and shows DOWN in /targets for ~20-60s after boot
+      # (ultrareview merged_bug_003).
+      hitl-agent:
+        condition: service_healthy
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: hitl-grafana
+    environment:
+      # Anonymous viewer access for the portfolio demo. NOT for prod.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_USERS_DEFAULT_THEME: "dark"
+      # Suppress the "update available" banner in the demo.
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      # Prometheus boots fast and has no healthcheck declared; condition:
+      # service_started is the explicit equivalent of the prior list form
+      # and tolerates the lack of a healthcheck.
+      prometheus:
+        condition: service_started
+    restart: unless-stopped

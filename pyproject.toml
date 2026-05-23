@@ -30,3 +30,24 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "ASYNC"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Eval one-off probes + adversarial fixtures aren't part of the runtime app.
+# We skip a couple of lints there to keep the CI signal-to-noise high.
+"eval/_*.py" = ["E402", "B008"]
+# Tests legitimately use blocking I/O and late-bound imports (after fixture
+# definitions for env isolation). Relax the async + import-order rules; keep
+# all the others (unused vars, real bugs, etc.).
+"tests/*.py" = ["E402", "ASYNC230", "ASYNC240"]
+
+[tool.bandit]
+# Bandit findings for files we own and ship in the runtime app. Tests + eval
+# scripts often legitimately do things bandit flags (asserts in tests,
+# subprocess in MCP launchers) — excluded to keep CI signal clean.
+exclude_dirs = ["tests", "eval", "data"]
+skips = [
+    # B101: assert_used — assert is fine inside src/ guards; this is not
+    # security-sensitive use. If a real auth/policy invariant is asserted, we
+    # cover it in tests/test_policy.py separately.
+    "B101",
+]

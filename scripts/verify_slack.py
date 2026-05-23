@@ -223,7 +223,7 @@ def check_post_and_update(
     ts = post["ts"]
     print(f"  ✓ posted (ts={ts})")
 
-    print(f"\n[4/6] chat.update — updating message in place (mirrors graph audit-close)")
+    print("\n[4/6] chat.update — updating message in place (mirrors graph audit-close)")
     updated_blocks = [
         {
             "type": "section",
@@ -265,7 +265,7 @@ def check_signing_secret_round_trip(secret: str) -> bool:
 
     body = b"payload=%7B%22action%22%3A%22approve%22%7D"
     ts = str(int(time.time()))
-    base = f"v0:{ts}:".encode("utf-8") + body
+    base = f"v0:{ts}:".encode() + body
     sig = "v0=" + hmac.new(secret.encode("utf-8"), base, hashlib.sha256).hexdigest()
 
     # Positive: a correctly-signed request must verify.

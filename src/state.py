@@ -71,6 +71,13 @@ class AgentState(TypedDict, total=False):
     # ---- Audit + observability ----
     audit_log: list[dict[str, Any]]  # APPEND-ONLY — never mutate prior entries
     cost_breakdown: dict[str, float]  # {"classify": 0.0001, "draft": 0.0008, ...}
+    tokens_breakdown: dict[str, int]  # {"classify": 230, "draft": 1240, ...}
+    # `total_tokens` / `total_cost_usd` are derived at read time from the dicts
+    # above. LangGraph rebuilds state from node-return partial dicts, so primitive
+    # scalar mutations on the live AgentState don't survive across super-steps;
+    # dict mutations do (the dict is shared by reference). Keep the scalar fields
+    # for back-compat — populate only via final-snapshot computation in callers
+    # that need a single number (e.g. eval/run_experiments.py).
     total_tokens: int
     total_cost_usd: float
     trace_url: str
@@ -127,6 +134,7 @@ def initial_state(
         final_state="",
         audit_log=[],
         cost_breakdown={},
+        tokens_breakdown={},
         total_tokens=0,
         total_cost_usd=0.0,
         trace_url="",

@@ -1,0 +1,15 @@
+# Auto-load dashboard JSON files from /var/lib/grafana/dashboards.
+# The HITL overview lives next to this file's mount.
+apiVersion: 1
+
+providers:
+  - name: HITL Dashboards
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: true

@@ -91,25 +91,48 @@ def verify_slack_signature(
 
 
 def _register_handlers(app: AsyncApp) -> None:
+    import logging
+
+    log = logging.getLogger(__name__)
+
     @app.action("approve_button")
     async def on_approve(ack: Any, body: dict[str, Any], client: Any) -> None:
         await ack()
         thread_id = _thread_id_from_body(body)
         approver = body.get("user", {}).get("id", "")
+        log.info("approve_button clicked: thread_id=%r approver=%r", thread_id, approver)
+        if not thread_id:
+            log.warning("approve_button: could not resolve thread_id from body — resume skipped")
+            return
         await _resume_graph(thread_id, {"action": "approve", "approver_id": approver})
 
     @app.action("reject_button")
     async def on_reject(ack: Any, body: dict[str, Any], client: Any) -> None:
         await ack()
+        thread_id = _thread_id_from_body(body)
+        log.info("reject_button clicked: thread_id=%r", thread_id)
+        # Mirror on_approve's guard (ultrareview bug_007). Without this, a
+        # legacy/malformed Slack payload would open a modal whose
+        # private_metadata carries thread_id="" — the user fills it out, the
+        # submit handler calls _resume_graph(""), and the lower-layer guard
+        # silently no-ops with no warning, no audit, no surfaced error.
+        if not thread_id:
+            log.warning("reject_button: could not resolve thread_id from body — modal skipped")
+            return
         await client.views_open(
             trigger_id=body["trigger_id"],
-            view=_reject_modal(_thread_id_from_body(body)),
+            view=_reject_modal(thread_id),
         )
 
     @app.action("edit_button")
     async def on_edit(ack: Any, body: dict[str, Any], client: Any) -> None:
         await ack()
         thread_id = _thread_id_from_body(body)
+        log.info("edit_button clicked: thread_id=%r", thread_id)
+        # Same guard as on_approve / on_reject — see ultrareview bug_007.
+        if not thread_id:
+            log.warning("edit_button: could not resolve thread_id from body — modal skipped")
+            return
         original_draft = _draft_from_body(body)
         await client.views_open(
             trigger_id=body["trigger_id"],
@@ -145,23 +168,35 @@ def _register_handlers(app: AsyncApp) -> None:
 
 
 def _thread_id_from_body(body: dict[str, Any]) -> str:
-    """The Slack message blocks carry `block_id="ticket-<id>"` so we can map
-    a button click back to the LangGraph thread_id (= ticket_id)."""
+    """Recover the LangGraph thread_id (== ticket_id) from a Slack action payload.
+
+    Three resolution paths in order of reliability:
+      1. button `value` (set explicitly by `_build_approval_blocks` in nodes.py)
+      2. action's `block_id` (Slack carries the parent block's block_id on
+         the action; we set this to ticket_id on the actions block)
+      3. message-level metadata (legacy fallback)
+    """
     actions = body.get("actions") or []
     if actions:
-        block_id = actions[0].get("block_id", "")
+        first = actions[0]
+        # 1. button value — most reliable, explicitly set by us
+        value = str(first.get("value", ""))
+        if value.startswith("ticket-"):
+            return value
+        # 2. block_id on the actions block
+        block_id = str(first.get("block_id", ""))
         if block_id.startswith("ticket-"):
-            return block_id  # `ticket-<uuid>` IS the thread_id
-    # Fallback: parse from message metadata
+            return block_id
+    # 3. metadata fallback
     msg = body.get("message", {})
     metadata = msg.get("metadata", {}).get("event_payload", {})
-    return metadata.get("thread_id", "")
+    return str(metadata.get("thread_id", ""))
 
 
 def _draft_from_body(body: dict[str, Any]) -> str:
     msg = body.get("message", {})
     metadata = msg.get("metadata", {}).get("event_payload", {})
-    return metadata.get("draft", "")
+    return str(metadata.get("draft", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +277,7 @@ async def run_socket_mode() -> None:
     settings.require_secrets("slack_bot_token", "slack_app_token", "slack_signing_secret")
     app = get_app()
     handler = AsyncSocketModeHandler(app, settings.slack_app_token)
-    await handler.start_async()
+    await handler.start_async()  # type: ignore[no-untyped-call]
 
 
 if __name__ == "__main__":

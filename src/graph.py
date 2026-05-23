@@ -125,7 +125,7 @@ def compile_with_checkpointer(checkpointer: SqliteSaver) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def build_full_graph_builder() -> StateGraph:
+def build_full_graph_builder() -> StateGraph[AgentState]:
     """Construct the production graph per spec.md §6 + CLAUDE.md flow.
 
     Slack post BEFORE interrupt — Implementation Rule 1. interrupt_gate is a
@@ -168,23 +168,34 @@ def build_full_graph_builder() -> StateGraph:
     # Default 0 keeps v3 single-agent path intact. Toggle without code change.
     # See docs/v4_multiagent.md for the architecture lock + invariants.
     #
-    # DEPRECATION (v4.1): the v3 single-agent path is retained ONLY as a
-    # comparison artifact for the v3-vs-v4 portfolio iteration story
-    # (eval/results_v3_live.json vs eval/results_v4_live.json). It is NOT a
-    # production-rollback safety net for a 24h-build portfolio with no live
-    # traffic. Do not extend the v3 path. Do not refactor it.
+    # BOTH PATHS RETAINED INTENTIONALLY — do NOT delete the v3 path.
+    # The v3-vs-v4 head-to-head IS the deliverable, not a stepping stone.
     #
-    # CONCRETE REMOVAL TRIGGER (any one is sufficient):
-    #   1. Demo 4 (Critic intercept) recorded and uploaded — comparison data
-    #      now lives in the demo video, not in runtime code.
-    #   2. First portfolio interview cycle complete — recruiters who care about
-    #      the v3-vs-v4 narrative have already seen it.
-    #   3. v4.1 plan starts execution — that plan owns the removal task.
-    # When any trigger fires: delete the if/else above, remove src.nodes
-    # enrich_context_node + draft_response_node from src/nodes.py, retire
-    # tests/test_integration_smoke.py, default MULTIAGENT_ENABLED → 1.
+    # History of this default:
+    # - Through 2026-05-21: default = v3. The 10-ticket curated + 10-ticket
+    #   Bitext evals tied on every safety metric, and v3 was ahead on
+    #   response_quality. Default reflected the measured-best path.
+    # - 2026-05-22: the 27-intent Bitext breadth eval ran. v3 produced 6
+    #   dangerous false auto-sends (invoice queries, order tracking,
+    #   change_shipping_address). v4 caught 5 of those 6, leaving only 1.
+    #   See eval/bitext27_findings.md.
+    # - 2026-05-22: 25-ticket adversarial red-team set ran. v3 = 18/25, v4 =
+    #   21/25 — v4 catches 3 more classifier_trap cases. See
+    #   eval/results_adversarial_v3.md vs _v4.md.
+    # - 2026-05-23: default flipped to MULTIAGENT_ENABLED=1 (v4). The newer
+    #   data shows v4 is materially safer on the harder distributions; the
+    #   trade-offs (~2× cost per ticket, more conservative escalation on
+    #   simple FAQs) are documented in METHODOLOGY.md and accepted.
+    #
+    # The Critic is structurally one-directional: it can only LOWER
+    # draft_confidence, so v4 escalates >= v3 always. That is the mechanism
+    # by which v4 catches v3's dangerous auto-sends; it is also why v4
+    # over-escalates some benign FAQs.
+    #
+    # Keeping v3 costs almost nothing (two node functions); set
+    # MULTIAGENT_ENABLED=0 to recover the baseline path for direct comparison.
     import os as _os
-    _MULTIAGENT = _os.environ.get("MULTIAGENT_ENABLED", "0") == "1"
+    _MULTIAGENT = _os.environ.get("MULTIAGENT_ENABLED", "1") == "1"
 
     # --- nodes ---
     builder.add_node("pii_redact", pii_redact_node)

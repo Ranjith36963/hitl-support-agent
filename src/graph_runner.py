@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time as _time
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ from langgraph.types import Command
 
 from src.config import settings
 from src.graph import async_sqlite_checkpointer, build_full_graph_builder
+from src.metrics import E2E_LATENCY, TICKETS_TOTAL
 from src.state import AgentState
 
 log = logging.getLogger(__name__)
@@ -61,8 +63,13 @@ async def startup() -> None:
         # we stamp on tickets and the mode the graph was actually compiled in
         # are guaranteed identical (they're both reading the same env value
         # microseconds apart). Frozen for the lifetime of this graph object.
+        # Default MUST match src/graph.py's read: both flipped to "1" on
+        # 2026-05-23. Diverging defaults silently mislabel v4 runs as v3 in
+        # LangSmith metadata + audit_log + Prometheus labels (ultrareview
+        # bug_011). If you flip one default, flip both — or extract this
+        # into a shared helper.
         import os as _os
-        _compiled_mode = "v4" if _os.environ.get("MULTIAGENT_ENABLED", "0") == "1" else "v3"
+        _compiled_mode = "v4" if _os.environ.get("MULTIAGENT_ENABLED", "1") == "1" else "v3"
 
         _checkpoint_stack = AsyncExitStack()
         await _checkpoint_stack.__aenter__()
@@ -160,12 +167,39 @@ async def start_ticket(ticket_id: str, state: AgentState) -> None:
     state["graph_version"] = _compiled_mode
     g = graph()
     config = {"configurable": {"thread_id": ticket_id}}
+    _start = _time.monotonic()
     async with _lock:
         async for chunk in g.astream(state, config):
             if "__interrupt__" in chunk:
                 log.info("Ticket %s paused for approval", ticket_id)
+                # Don't observe E2E_LATENCY here — the ticket isn't done yet,
+                # human approval is pending. E2E fires on the resume() side
+                # of the pause, or when the graph completes without interrupt.
                 return
         log.info("Ticket %s completed without interrupt (auto-send path)", ticket_id)
+        # Auto-send path — terminal state reached without human approval.
+        await _emit_terminal_metrics(g, config, _start)
+
+
+async def _emit_terminal_metrics(
+    g: Any, config: dict[str, Any], start_monotonic: float
+) -> None:
+    """Observe E2E_LATENCY and increment TICKETS_TOTAL when a ticket reaches
+    its terminal state. Called from both start_ticket (auto-send path) and
+    resume (post-approval path).
+
+    Reads the final values via aget_state — best-effort so metric
+    emission can't crash the graph runner.
+    """
+    E2E_LATENCY.observe(_time.monotonic() - start_monotonic)
+    try:
+        snap = await g.aget_state(config)
+        values = snap.values or {}
+    except Exception:  # noqa: BLE001 — metrics must never crash the runner
+        values = {}
+    intent = str(values.get("intent") or "unknown")
+    outcome = str(values.get("final_state") or "unknown")
+    TICKETS_TOTAL.labels(intent=intent, outcome=outcome).inc()
 
 
 async def resume(thread_id: str, value: dict[str, Any]) -> None:
@@ -207,9 +241,12 @@ async def resume(thread_id: str, value: dict[str, Any]) -> None:
         )
         return
 
+    _resume_start = _time.monotonic()
     async with _lock:
         async for chunk in g.astream(Command(resume=value), config):
             if "__interrupt__" in chunk:
                 log.info("Ticket %s re-paused (likely revalidate-changed)", thread_id)
                 return
     log.info("Ticket %s resumed and completed", thread_id)
+    # Approved/edited/rejected path — terminal state reached after human.
+    await _emit_terminal_metrics(g, config, _resume_start)

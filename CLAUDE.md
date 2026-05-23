@@ -4,11 +4,11 @@
 
 ## Project state — v4 multi-agent shipped behind feature flag
 
-- **v3** (single-agent, 87 tests) and **v4** (multi-agent: Researcher + Drafter↔Critic, +31 tests) both live in the codebase.
-- Toggle: `MULTIAGENT_ENABLED=1` enables v4. Default 0 keeps v3 path.
-- **v3 retained as comparison artifact**, NOT production-rollback. Removal scheduled for v4.1 — see deprecation comment in `src/graph.py`.
-- Live LLM eval results: both modes hold `false_auto_send_rate = 0%` on 10-ticket Bitext sample. Real numbers in `README.md` v4 section.
-- Tests: 118/118 passing in both flag modes.
+- **v3** (single-agent) and **v4** (multi-agent: Researcher + Drafter↔Critic) both live in the codebase.
+- Toggle: `MULTIAGENT_ENABLED=1` enables v4 (**default since 2026-05-23**). `=0` keeps v3 path for direct comparison.
+- **Both paths retained intentionally** — the v3↔v4 head-to-head IS the deliverable. On the 10-ticket curated + 10-ticket Bitext eval sets v3 and v4 tied; on the 27-intent breadth eval and 25-ticket adversarial set **v4 caught 5/6 dangerous false auto-sends v3 missed** and 3 more classifier_trap cases — that's what drove the default flip. Trade-off: v4 ~2× cost/ticket and over-escalates some simple FAQs. Full audit in `eval/bitext27_findings.md` + `discussion.md`.
+- Live LLM eval results: both modes hold `false_auto_send_rate = 0%` on the 10-ticket curated + 10-ticket Bitext sets. Both FAIL safety on bitext27 (v3=54.5%, v4=50% of auto-sends wrong — small denominator; absolute count fell 6 → 1).
+- Tests: 143/143 passing in both flag modes. CI green on every PR.
 
 ## Source docs
 
@@ -49,7 +49,7 @@ Agent-first, human-on-demand customer support agent. **Real Gmail** in/out (IMAP
 | Tools | **Three MCP servers** — Read / Email Write / Slack Write |
 | Policy corpus | `data/acme_policies.md` (fictional, RAG-retrieved) |
 | Backend | FastAPI |
-| Eval data | Bitext Customer Support (50-ticket sample, 40 dev / 10 holdout) |
+| Eval data | 10 hand-curated tickets (`eval/dataset.py`) + 10 real Bitext tickets (`eval/bitext_dataset.py` — first batch, 10 of Bitext's 27 intents) |
 
 ## Graph node order — Slack post BEFORE interrupt!
 
@@ -97,7 +97,7 @@ Auto-send path skips from Confidence Check straight to Finalize.
 src/    state.py  graph.py  nodes.py  llm.py  policy.py  slack_router.py
         pii.py    email_listener.py   slack_handler.py   mcp_client.py   server.py
 mcp_server/  support_read.py  support_email_write.py  support_slack_write.py
-data/   bitext_sample.csv  customers_seed.json  acme_policies.md
+data/   acme_policies.md  customers_seed.json  prompts/
 eval/   dataset.py  evaluators.py  run_experiments.py
 ui/     edit.html         (Slack Edit fallback — modal preferred)
 tests/  test_state.py  test_policy.py  test_slack_router.py  test_pii.py  test_resume.py
@@ -124,7 +124,7 @@ Secrets: `OPENROUTER_API_KEY` · `LANGSMITH_API_KEY` · `LANGSMITH_PROJECT` · `
 
 ## Red flags — do not ship with these
 
-Hardcoded keys · Single test case (no Bitext eval) · No restart-resume demo · Approve/Reject only (no Edit) · No audit log · No idempotency on send · Fake v1→v2→v3 metrics · **Slack post AFTER interrupt** (graph hangs forever) · Read-MCP exposing send_email (capability bleed).
+Hardcoded keys · Single test case (no real eval set) · No restart-resume demo · Approve/Reject only (no Edit) · No audit log · No idempotency on send · Fake v1→v2→v3 metrics · **Slack post AFTER interrupt** (graph hangs forever) · Read-MCP exposing send_email (capability bleed).
 
 ## MCPs configured (Claude Code dev environment)
 
@@ -135,4 +135,4 @@ Hardcoded keys · Single test case (no Bitext eval) · No restart-resume demo ·
 ## Links
 
 - Repo: https://github.com/Ranjith36963/hitl-support-agent
-- Bitext: https://huggingface.co/datasets/bitext/Bitext-customer-support-llm-chatbot-training-dataset
+- Bitext (external benchmark — 10-intent first batch wired in; see `eval/bitext_findings.md`): https://huggingface.co/datasets/bitext/Bitext-customer-support-llm-chatbot-training-dataset

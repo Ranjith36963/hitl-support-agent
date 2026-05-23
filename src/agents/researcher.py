@@ -26,6 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langsmith import traceable
 
 from src.agents.base import build_handoff_metadata, get_client
+from src.metrics import timed_node
 from src.state import AgentState
 
 
@@ -66,7 +67,7 @@ def _customer_email_from_audit(state: AgentState) -> str:
             tm_legacy = entry.get("token_map") or {}
             for token, original in tm_legacy.items():
                 if token.startswith("[EMAIL_"):
-                    return original
+                    return str(original)
     return "unknown@example.com"
 
 
@@ -75,6 +76,7 @@ def _hash_context(payload: Any) -> str:
     return hashlib.sha256(blob).hexdigest()
 
 
+@timed_node("researcher")
 @traceable(run_type="chain", name="researcher_agent")
 async def research_node(state: AgentState) -> dict[str, Any]:
     """The Researcher's single graph node — intent-routed tool selection."""

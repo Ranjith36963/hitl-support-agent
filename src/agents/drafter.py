@@ -6,7 +6,7 @@ Replaces draft_response_node when MULTIAGENT_ENABLED=1. Internally:
 3. If Critic verdict == "revise" AND iteration < MAX → loop to step 1
 4. Else → exit, parent graph proceeds to gates
 
-Hard cap: MAX_CRITIC_ITERATIONS=2. Always exits.
+Hard cap: MAX_CRITIC_ITERATIONS=3 (up to 2 revision passes). Always exits.
 
 Output shape matches v3 draft_response_node so downstream nodes are unchanged:
   original_draft, final_draft, draft_confidence, audit_log.
@@ -15,6 +15,7 @@ Output shape matches v3 draft_response_node so downstream nodes are unchanged:
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -23,28 +24,50 @@ from langsmith import traceable
 
 from src.agents.base import build_handoff_metadata, get_llm, get_model_id, load_prompt
 from src.agents.critic import critic_node
+from src.llm import track_llm_usage
+from src.metrics import LLM_LATENCY, timed_node
 from src.state import AgentState
 
-MAX_CRITIC_ITERATIONS = 2
+# Loop cap. The route condition is `iteration < MAX_CRITIC_ITERATIONS - 1`,
+# so 3 lets the Critic loop at iterations 0 and 1 → at most 3 drafts / 2
+# revision passes, then a hard exit. Keep this small: every extra iteration is
+# another Drafter + Critic LLM round-trip. Do NOT raise it without re-sizing
+# the bound check in tests/test_drafter_critic_loop.py.
+MAX_CRITIC_ITERATIONS = 3
 _DRAFTER_PROMPT = load_prompt("drafter_system")
 
 
 @traceable(run_type="llm", name="drafter_llm")
-async def _llm_draft(payload: dict[str, Any]) -> dict[str, Any]:
-    """Module-level so tests can patch / mock cleanly."""
+async def _llm_draft(
+    payload: dict[str, Any], state: AgentState | None = None
+) -> dict[str, Any]:
+    """Module-level so tests can patch / mock cleanly.
+
+    `state` is optional. When supplied, token+cost telemetry from the response
+    is folded into AgentState via `track_llm_usage` under the "drafter" label.
+    Tests that monkeypatch this function pass `state=None` or omit it.
+    """
     client = get_llm()
-    resp = await client.chat.completions.create(
-        model=get_model_id("DRAFTER_MODEL_OVERRIDE"),
-        messages=[
-            {"role": "system", "content": _DRAFTER_PROMPT},
-            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-        ],
-        response_format={"type": "json_object"},
-        temperature=0.2,
-    )
-    return json.loads((resp.choices[0].message.content or "").strip())
+    model = get_model_id("DRAFTER_MODEL_OVERRIDE")
+    start = time.monotonic()
+    try:
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _DRAFTER_PROMPT},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.2,
+        )
+    finally:
+        LLM_LATENCY.labels(call="drafter").observe(time.monotonic() - start)
+    track_llm_usage(state, "drafter", model, getattr(resp, "usage", None))
+    parsed: dict[str, Any] = json.loads((resp.choices[0].message.content or "").strip())
+    return parsed
 
 
+@timed_node("drafter")
 @traceable(run_type="chain", name="drafter_agent")
 async def drafter_node(state: AgentState) -> dict[str, Any]:
     """Write (or rewrite) the draft. Picks up Critic feedback if present."""
@@ -64,7 +87,7 @@ async def drafter_node(state: AgentState) -> dict[str, Any]:
     if state.get("rejection_reason"):
         payload["prior_rejection_reason"] = state["rejection_reason"]
 
-    result = await _llm_draft(payload)
+    result = await _llm_draft(payload, state=state)
 
     return {
         # Preserve original_draft from iteration 0; later iterations overwrite final_draft only

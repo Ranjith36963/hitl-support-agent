@@ -15,22 +15,30 @@ augments, never replaces, the deterministic safety gates.
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime
 from typing import Any
 
 from langsmith import traceable
 
 from src.agents.base import build_handoff_metadata, get_llm, get_model_id, load_prompt
+from src.llm import track_llm_usage
+from src.metrics import LLM_LATENCY, timed_node
 from src.state import AgentState
 
 _CRITIC_PROMPT = load_prompt("critic_system")
 
 
 @traceable(run_type="llm", name="critic_judge")
-async def _llm_judge(payload: dict[str, Any]) -> dict[str, Any]:
+async def _llm_judge(
+    payload: dict[str, Any], state: AgentState | None = None
+) -> dict[str, Any]:
     """Call the LLM to score the draft. Returns {verdict, severity, feedback}.
 
     Module-level so tests can patch `src.agents.critic._llm_judge`.
+
+    `state` is optional — when supplied, token+cost telemetry is accumulated
+    under the "critic" label. Tests that mock this function omit it.
 
     Failure mode: if the LLM returns malformed JSON (response_format=json_object
     is reliable on DeepSeek but not bulletproof), escalate-on-uncertainty —
@@ -39,18 +47,25 @@ async def _llm_judge(payload: dict[str, Any]) -> dict[str, Any]:
     to a human, never silently pass through.
     """
     client = get_llm()
-    resp = await client.chat.completions.create(
-        model=get_model_id("CRITIC_MODEL_OVERRIDE"),
-        messages=[
-            {"role": "system", "content": _CRITIC_PROMPT},
-            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-        ],
-        response_format={"type": "json_object"},
-        temperature=0.1,  # determinism > creativity for an auditor
-    )
+    model = get_model_id("CRITIC_MODEL_OVERRIDE")
+    start = time.monotonic()
+    try:
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _CRITIC_PROMPT},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.1,  # determinism > creativity for an auditor
+        )
+    finally:
+        LLM_LATENCY.labels(call="critic").observe(time.monotonic() - start)
+    track_llm_usage(state, "critic", model, getattr(resp, "usage", None))
     raw = (resp.choices[0].message.content or "").strip()
     try:
-        return json.loads(raw)
+        parsed: dict[str, Any] = json.loads(raw)
+        return parsed
     except json.JSONDecodeError:
         # Escalate-on-uncertainty — Critic failure must NOT auto-pass. Lowering
         # draft_confidence (via severity 0.5) routes to Gate 2 → human review.
@@ -61,6 +76,7 @@ async def _llm_judge(payload: dict[str, Any]) -> dict[str, Any]:
         }
 
 
+@timed_node("critic")
 @traceable(run_type="chain", name="critic_agent")
 async def critic_node(state: AgentState) -> dict[str, Any]:
     """Audit the current draft and adjust draft_confidence accordingly.
@@ -74,10 +90,15 @@ async def critic_node(state: AgentState) -> dict[str, Any]:
         "policy_quotes": state.get("policy_matches") or [],
         "intent": state.get("intent", ""),
     }
-    verdict = await _llm_judge(payload)
+    verdict = await _llm_judge(payload, state=state)
 
     severity = float(verdict.get("severity", 0.0))
     severity = max(0.0, min(1.0, severity))  # clamp to [0,1]
+    # ONE-DIRECTIONAL BY DESIGN — multiplier (1 - severity*0.5) is in [0.5, 1.0],
+    # so this can only LOWER draft_confidence. Do NOT make it able to raise it:
+    # that would let the Critic LLM push a draft past Gate 2's 0.85 threshold
+    # into auto-send, breaking false_auto_send_rate = 0%. Full rationale +
+    # rejected proposal: docs/v4_multiagent.md "Why the Critic is ONE-DIRECTIONAL".
     new_confidence = state.get("draft_confidence", 1.0) * (1 - severity * 0.5)
 
     audit_entry = {

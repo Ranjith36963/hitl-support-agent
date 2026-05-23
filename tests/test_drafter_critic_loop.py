@@ -1,4 +1,4 @@
-"""Drafter ↔ Critic loop: bounded, terminates within 2 iterations,
+"""Drafter ↔ Critic loop: bounded, terminates within 3 iterations,
 respects critic verdict, preserves v3 state contract."""
 from unittest.mock import patch
 
@@ -46,7 +46,7 @@ async def test_loop_terminates_on_accept_first_iteration():
 
 
 @pytest.mark.asyncio
-async def test_loop_caps_at_two_iterations_even_when_critic_keeps_revising():
+async def test_loop_caps_at_three_iterations_even_when_critic_keeps_revising():
     """Critic returns 'revise' forever; loop must still exit at iteration cap."""
     drafter_calls = 0
     critic_calls = 0
@@ -78,9 +78,9 @@ async def test_loop_caps_at_two_iterations_even_when_critic_keeps_revising():
         state = {"ticket_id": "T1", "intent": "refund", "audit_log": []}
         await subgraph.ainvoke(state)
 
-    # Hard cap is MAX_CRITIC_ITERATIONS=2: at most 2 drafts, 2 critic runs
-    assert drafter_calls <= 2, f"drafter called {drafter_calls} times — cap broken"
-    assert critic_calls <= 2, f"critic called {critic_calls} times — cap broken"
+    # Hard cap is MAX_CRITIC_ITERATIONS=3: at most 3 drafts, 3 critic runs
+    assert drafter_calls <= 3, f"drafter called {drafter_calls} times — cap broken"
+    assert critic_calls <= 3, f"critic called {critic_calls} times — cap broken"
 
 
 @pytest.mark.asyncio

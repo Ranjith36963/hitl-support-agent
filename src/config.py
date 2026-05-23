@@ -62,7 +62,12 @@ class Settings(BaseSettings):
     imap_poll_interval_sec: int = 30
 
     # ---- Server ----
-    host: str = "0.0.0.0"
+    # Default to loopback only (127.0.0.1) — safer default for dev. Deployment
+    # configs that need to accept external traffic must explicitly set HOST=0.0.0.0
+    # via the env (Docker, container platforms typically already do this).
+    # bandit B104 was triggered by the previous "0.0.0.0" default; threat model
+    # documents the choice in docs/threat_model.md.
+    host: str = "127.0.0.1"
     port: int = 8000
 
     @property

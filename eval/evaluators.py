@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from eval.dataset import EvalTicket
@@ -49,6 +49,13 @@ class EvalResult:
     error: str | None = None  # set if graph raised an exception
     llm_available: bool = True
     human_rejection_count: int = 0  # incremented each time human rejected draft
+
+    # Cost telemetry — populated from terminal AgentState. Zero in --no-llm mode
+    # and any time `_PRICING` table doesn't know the model id (fail-quiet, never
+    # surface a wrong number).
+    total_tokens: int = 0
+    total_cost_usd: float = 0.0
+    cost_breakdown: dict[str, float] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -174,25 +181,35 @@ Rubric:
 Output ONLY a JSON object: {"score": <1-5>, "reason": "<one sentence>"}"""
 
 
+def _judge_provider_keyed() -> bool:
+    """Is the active LLM provider's API key set? Drives the judge-skip gate.
+
+    Honors LLM_PROVIDER=openai (checks OPENAI_API_KEY) or default OpenRouter.
+    """
+    if os.environ.get("LLM_PROVIDER", "").lower() == "openai":
+        return bool(os.environ.get("OPENAI_API_KEY", ""))
+    return bool(os.environ.get("OPENROUTER_API_KEY", ""))
+
+
 async def response_quality_single(
     customer_message: str, draft: str
 ) -> dict[str, Any] | None:
     """Score one draft. Returns None if LLM not available.
 
-    Caller (run_experiments.py) is responsible for checking OPENROUTER_API_KEY.
+    Caller (run_experiments.py) is responsible for checking the provider key.
+    Provider/model selection is delegated to src.llm so the judge always
+    runs on the same provider as the graph itself (no cross-provider judging).
     """
-    api_key = os.environ.get("OPENROUTER_API_KEY", "")
-    if not api_key:
+    if not _judge_provider_keyed():
         return None
 
     try:
-        from openai import AsyncOpenAI  # lazy import — avoids hard dep in --no-llm path
+        # Lazy import — avoids hard dep in --no-llm path. Reusing the project's
+        # factories means LLM_PROVIDER works here for free.
+        from src.llm import _client, _model
 
-        client = AsyncOpenAI(
-            api_key=api_key,
-            base_url=os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-        )
-        model = os.environ.get("OPENROUTER_MODEL", "deepseek/deepseek-chat")
+        client = _client()
+        model = _model()
 
         resp = await client.chat.completions.create(
             model=model,
@@ -223,12 +240,14 @@ async def response_quality(results: list[EvalResult]) -> dict[str, Any]:
         per_ticket: list[dict] with ticket_id, score, reason.
         llm_available: bool
     """
-    if not os.environ.get("OPENROUTER_API_KEY", ""):
+    if not _judge_provider_keyed():
+        provider = os.environ.get("LLM_PROVIDER", "openrouter").lower()
+        key_name = "OPENAI_API_KEY" if provider == "openai" else "OPENROUTER_API_KEY"
         return {
             "avg_score": None,
             "per_ticket": [],
             "llm_available": False,
-            "note": "OPENROUTER_API_KEY not set — response_quality skipped",
+            "note": f"{key_name} not set — response_quality skipped",
         }
 
     per_ticket: list[dict[str, Any]] = []
@@ -334,6 +353,7 @@ def failure_slice(results: list[EvalResult]) -> dict[str, Any]:
 
 __all__ = [
     "EvalResult",
+    "QUALITY_RUBRIC",
     "escalation_precision",
     "failure_slice",
     "false_auto_send_rate",

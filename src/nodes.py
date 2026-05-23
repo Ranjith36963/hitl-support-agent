@@ -45,6 +45,7 @@ from src.mcp_client import (
     SlackPostParams,
     SlackUpdateParams,
 )
+from src.metrics import timed_node
 from src.pii import (
     clear_ticket as _pii_clear_ticket,
 )
@@ -158,7 +159,12 @@ def _build_approval_blocks(state: AgentState, kb_quote: str) -> list[dict[str, A
         },
         {
             "type": "section",
-            "block_id": ticket_id,  # block_id == thread_id; slack_handler reads it
+            # NOTE: block_id was previously set here as ticket_id, but Slack
+            # rejects messages with duplicate block_ids. The actions block
+            # below is the one that needs ticket_id (so the action payload
+            # can recover thread_id). Section gets a deterministic but
+            # distinct id for stability across edit/update calls.
+            "block_id": f"{ticket_id}-why",
             "text": {"type": "mrkdwn", "text": "*Why I paused*\n" + "\n".join(why_lines)},
         },
     ]
@@ -177,23 +183,34 @@ def _build_approval_blocks(state: AgentState, kb_quote: str) -> list[dict[str, A
             },
             {
                 "type": "actions",
+                # block_id on the ACTIONS block — Slack puts this on the
+                # button's action payload at body["actions"][0]["block_id"].
+                # Without it, that field would be an auto-generated hash and
+                # _thread_id_from_body couldn't recover the ticket_id.
+                "block_id": ticket_id,
                 "elements": [
                     {
                         "type": "button",
                         "style": "primary",
                         "text": {"type": "plain_text", "text": "Approve"},
                         "action_id": "approve_button",
+                        # `value` is round-tripped to the action payload at
+                        # body["actions"][0]["value"]. Defense-in-depth on top
+                        # of block_id — either path resolves the ticket_id.
+                        "value": ticket_id,
                     },
                     {
                         "type": "button",
                         "text": {"type": "plain_text", "text": "Edit"},
                         "action_id": "edit_button",
+                        "value": ticket_id,
                     },
                     {
                         "type": "button",
                         "style": "danger",
                         "text": {"type": "plain_text", "text": "Reject"},
                         "action_id": "reject_button",
+                        "value": ticket_id,
                     },
                 ],
             },
@@ -232,8 +249,9 @@ def pii_redact_node(state: AgentState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+@timed_node("classify_intent")
 async def classify_intent_node(state: AgentState) -> dict[str, Any]:
-    result = await classify_intent(state["customer_message"])
+    result = await classify_intent(state["customer_message"], state=state)
     return {
         "intent": result.intent,
         "intent_confidence": result.intent_confidence,
@@ -258,6 +276,7 @@ async def classify_intent_node(state: AgentState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+@timed_node("enrich_context")
 async def enrich_context_node(state: AgentState) -> dict[str, Any]:
     client = _client()
     customer_email = _customer_email_from_audit(state)
@@ -328,7 +347,7 @@ def _customer_email_from_audit(state: AgentState) -> str:
             tm_legacy = entry.get("token_map") or {}
             for token, original in tm_legacy.items():
                 if token.startswith("[EMAIL_"):
-                    return original
+                    return str(original)
     return "unknown@example.com"
 
 
@@ -337,6 +356,7 @@ def _customer_email_from_audit(state: AgentState) -> str:
 # ---------------------------------------------------------------------------
 
 
+@timed_node("draft_response")
 async def draft_response_node(state: AgentState) -> dict[str, Any]:
     profile = _last_profile_from_audit(state)
     history = state.get("customer_history") or []
@@ -349,6 +369,7 @@ async def draft_response_node(state: AgentState) -> dict[str, Any]:
         customer_history=history,
         policy_quotes=kb_quotes,
         rejection_reason=state.get("rejection_reason"),
+        state=state,
     )
     return {
         "original_draft": state.get("original_draft") or result.draft,
@@ -437,6 +458,7 @@ def channel_router_node(state: AgentState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+@timed_node("slack_notification")
 async def slack_notification_node(state: AgentState) -> dict[str, Any]:
     """Posts the Block Kit approval message BEFORE the interrupt. Saves
     `slack_message_ts` so resume targets the same message even after a
@@ -458,6 +480,12 @@ async def slack_notification_node(state: AgentState) -> dict[str, Any]:
     )
     return {
         "slack_message_ts": result.slack_message_ts,
+        # Replace the human-readable channel name (e.g. "#support-refunds")
+        # with the canonical channel ID (e.g. "C0B2U0W84MP") that Slack's
+        # `chat.update` API requires. Without this, every subsequent
+        # update_message call fails with `channel_not_found` and the
+        # approval message never visually changes after Approve/Edit/Reject.
+        "slack_channel": result.channel,
         "approval_status": "pending",
         "sla_deadline": sla_deadline,
         "audit_log": (state.get("audit_log") or [])
@@ -568,6 +596,7 @@ def reject_increment_node(state: AgentState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+@timed_node("revalidate_context")
 async def revalidate_context_node(state: AgentState) -> dict[str, Any]:
     client = _client()
     customer_email = _customer_email_from_audit(state)
@@ -598,13 +627,14 @@ def route_after_revalidate(state: AgentState) -> str:
 # ---------------------------------------------------------------------------
 
 
+@timed_node("summarize_changes")
 async def summarize_changes_node(state: AgentState) -> dict[str, Any]:
     old_snapshot: dict[str, Any] = {
         "customer_tier": state.get("customer_tier", ""),
         "policy_matches": state.get("policy_matches") or [],
     }
     new_snapshot = state.get("_revalidate_new_snapshot") or {}
-    delta = await summarize_context_changes(old_snapshot, new_snapshot)
+    delta = await summarize_context_changes(old_snapshot, new_snapshot, state=state)
 
     if state.get("slack_message_ts"):
         client = _client()
@@ -680,6 +710,7 @@ def finalize_action_node(state: AgentState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+@timed_node("send_email")
 async def send_email_node(state: AgentState) -> dict[str, Any]:
     # App-layer idempotency #1: state already says it's sent.
     if state.get("sent_message_id"):
@@ -785,6 +816,7 @@ def route_after_send(state: AgentState) -> str:
 # ---------------------------------------------------------------------------
 
 
+@timed_node("audit_log")
 async def audit_log_node(state: AgentState) -> dict[str, Any]:
     """Final close-out. Append-only audit entry + best-effort Slack update.
 
@@ -821,6 +853,7 @@ async def audit_log_node(state: AgentState) -> dict[str, Any]:
     }
 
 
+@timed_node("manual_queue")
 async def manual_queue_node(state: AgentState) -> dict[str, Any]:
     max_rej = int(os.environ.get("MAX_HUMAN_REJECTIONS", "3"))
     if state.get("send_status") == "failed_manual":

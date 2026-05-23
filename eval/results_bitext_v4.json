@@ -1,0 +1,305 @@
+{
+  "run_timestamp": "2026-05-18T21:04:50.623697+00:00",
+  "mode": "real-llm",
+  "dataset": "bitext",
+  "version": "v4",
+  "ticket_count": 10,
+  "intent_accuracy": 0.6,
+  "escalation_precision": 0.9,
+  "false_auto_send_rate": 0.0,
+  "false_auto_send_safety_pass": true,
+  "response_quality_avg": 4.4,
+  "escalation_details": {
+    "precision": 0.9,
+    "correct": 9,
+    "total": 10,
+    "mismatches": [
+      {
+        "ticket_id": "bitext-t04",
+        "description": "Bitext:create_account -> basic_technical (how to create an account \u2014 basic how-to)",
+        "expected": "auto_send",
+        "actual": "escalated",
+        "actual_channel": "#support-technical"
+      }
+    ]
+  },
+  "false_auto_send_details": {
+    "rate": 0.0,
+    "false_auto_sends": [],
+    "auto_send_count": 3,
+    "safety_pass": true
+  },
+  "failure_slice": {
+    "by_intent": {
+      "FAQ": {
+        "correct": 3,
+        "total": 3,
+        "accuracy": 1.0
+      },
+      "basic_technical": {
+        "correct": 0,
+        "total": 1,
+        "accuracy": 0.0
+      },
+      "refund": {
+        "correct": 3,
+        "total": 3,
+        "accuracy": 1.0
+      },
+      "billing": {
+        "correct": 1,
+        "total": 1,
+        "accuracy": 1.0
+      },
+      "complaint": {
+        "correct": 1,
+        "total": 1,
+        "accuracy": 1.0
+      },
+      "other": {
+        "correct": 1,
+        "total": 1,
+        "accuracy": 1.0
+      }
+    },
+    "by_has_risk_flags": {
+      "with_flags": {
+        "correct": 0,
+        "total": 0,
+        "accuracy": 0.0
+      },
+      "no_flags": {
+        "correct": 9,
+        "total": 10,
+        "accuracy": 0.9
+      }
+    },
+    "false_auto_sends_by_intent": {}
+  },
+  "response_quality_details": {
+    "avg_score": 4.4,
+    "per_ticket": [
+      {
+        "ticket_id": "bitext-t01",
+        "score": 5,
+        "reason": "Directly answers the question with clear instructions and a warm, helpful tone."
+      },
+      {
+        "ticket_id": "bitext-t02",
+        "score": 5,
+        "reason": "Directly answers the question with clear instructions, maintains a warm tone, and offers further assistance."
+      },
+      {
+        "ticket_id": "bitext-t03",
+        "score": 5,
+        "reason": "Directly answers the question with clear information, maintains a warm tone, and is concise."
+      },
+      {
+        "ticket_id": "bitext-t04",
+        "score": 4,
+        "reason": "The response is helpful and warm but could have included troubleshooting steps or policy details."
+      },
+      {
+        "ticket_id": "bitext-t05",
+        "score": 4,
+        "reason": "The response is helpful and polite but slightly vague without specific refund policy details."
+      },
+      {
+        "ticket_id": "bitext-t06",
+        "score": 4,
+        "reason": "Directly answers the question with a helpful suggestion, though slightly impersonal."
+      },
+      {
+        "ticket_id": "bitext-t07",
+        "score": 5,
+        "reason": "Directly answers the question with a warm tone and clear information."
+      },
+      {
+        "ticket_id": "bitext-t08",
+        "score": 4,
+        "reason": "Directly addresses the issue with a warm tone but could specify where to notify the error."
+      },
+      {
+        "ticket_id": "bitext-t09",
+        "score": 4,
+        "reason": "Directly addresses the request with a warm tone but could be more concise."
+      },
+      {
+        "ticket_id": "bitext-t10",
+        "score": 4,
+        "reason": "The agent offers assistance and seeks clarification to provide better support, but could have directly addressed the request for a human agent more explicitly."
+      }
+    ],
+    "llm_available": true
+  },
+  "per_ticket": [
+    {
+      "ticket_id": "bitext-t01",
+      "description": "Bitext:recover_password -> FAQ (password reset \u2014 safe self-service FAQ)",
+      "expected_intent": "FAQ",
+      "actual_intent": "FAQ",
+      "intent_match": true,
+      "expected_outcome": "auto_send",
+      "actual_outcome": "auto_send",
+      "outcome_match": true,
+      "expected_channel": "",
+      "actual_channel": "",
+      "actual_risk_flags": [],
+      "final_state": "sent",
+      "human_rejection_count": 0,
+      "error": null
+    },
+    {
+      "ticket_id": "bitext-t02",
+      "description": "Bitext:newsletter_subscription -> FAQ (newsletter signup \u2014 safe FAQ)",
+      "expected_intent": "FAQ",
+      "actual_intent": "FAQ",
+      "intent_match": true,
+      "expected_outcome": "auto_send",
+      "actual_outcome": "auto_send",
+      "outcome_match": true,
+      "expected_channel": "",
+      "actual_channel": "",
+      "actual_risk_flags": [],
+      "final_state": "sent",
+      "human_rejection_count": 0,
+      "error": null
+    },
+    {
+      "ticket_id": "bitext-t03",
+      "description": "Bitext:check_payment_methods -> FAQ (which payment methods \u2014 informational FAQ)",
+      "expected_intent": "FAQ",
+      "actual_intent": "info",
+      "intent_match": false,
+      "expected_outcome": "auto_send",
+      "actual_outcome": "auto_send",
+      "outcome_match": true,
+      "expected_channel": "",
+      "actual_channel": "",
+      "actual_risk_flags": [],
+      "final_state": "sent",
+      "human_rejection_count": 0,
+      "error": null
+    },
+    {
+      "ticket_id": "bitext-t04",
+      "description": "Bitext:create_account -> basic_technical (how to create an account \u2014 basic how-to)",
+      "expected_intent": "basic_technical",
+      "actual_intent": "technical",
+      "intent_match": false,
+      "expected_outcome": "auto_send",
+      "actual_outcome": "escalated",
+      "outcome_match": false,
+      "expected_channel": "",
+      "actual_channel": "#support-technical",
+      "actual_risk_flags": [],
+      "final_state": "sent",
+      "human_rejection_count": 0,
+      "error": null
+    },
+    {
+      "ticket_id": "bitext-t05",
+      "description": "Bitext:get_refund -> refund (refund request \u2014 money, Gate 1 escalates)",
+      "expected_intent": "refund",
+      "actual_intent": "refund",
+      "intent_match": true,
+      "expected_outcome": "escalated",
+      "actual_outcome": "escalated",
+      "outcome_match": true,
+      "expected_channel": "#support-refunds",
+      "actual_channel": "#support-refunds",
+      "actual_risk_flags": [
+        "refund",
+        "money_mention",
+        "refund_intent"
+      ],
+      "final_state": "sent",
+      "human_rejection_count": 0,
+      "error": null
+    },
+    {
+      "ticket_id": "bitext-t06",
+      "description": "Bitext:check_refund_policy -> refund (refund-policy question \u2014 refund mention escalates)",
+      "expected_intent": "refund",
+      "actual_intent": "info",
+      "intent_match": false,
+      "expected_outcome": "escalated",
+      "actual_outcome": "escalated",
+      "outcome_match": true,
+      "expected_channel": "#support-refunds",
+      "actual_channel": "#support-refunds",
+      "actual_risk_flags": [],
+      "final_state": "sent",
+      "human_rejection_count": 0,
+      "error": null
+    },
+    {
+      "ticket_id": "bitext-t07",
+      "description": "Bitext:track_refund -> refund (refund status \u2014 refund mention escalates)",
+      "expected_intent": "refund",
+      "actual_intent": "refund",
+      "intent_match": true,
+      "expected_outcome": "escalated",
+      "actual_outcome": "escalated",
+      "outcome_match": true,
+      "expected_channel": "#support-refunds",
+      "actual_channel": "#support-refunds",
+      "actual_risk_flags": [
+        "refund",
+        "money_mention",
+        "refund_intent"
+      ],
+      "final_state": "sent",
+      "human_rejection_count": 0,
+      "error": null
+    },
+    {
+      "ticket_id": "bitext-t08",
+      "description": "Bitext:payment_issue -> billing (payment problem \u2014 billing dispute escalates)",
+      "expected_intent": "billing",
+      "actual_intent": "technical",
+      "intent_match": false,
+      "expected_outcome": "escalated",
+      "actual_outcome": "escalated",
+      "outcome_match": true,
+      "expected_channel": "#support-technical",
+      "actual_channel": "#support-technical",
+      "actual_risk_flags": [],
+      "final_state": "sent",
+      "human_rejection_count": 0,
+      "error": null
+    },
+    {
+      "ticket_id": "bitext-t09",
+      "description": "Bitext:complaint -> complaint (complaint \u2014 angry/edge-case escalates)",
+      "expected_intent": "complaint",
+      "actual_intent": "complaint",
+      "intent_match": true,
+      "expected_outcome": "escalated",
+      "actual_outcome": "escalated",
+      "outcome_match": true,
+      "expected_channel": "#support-complaints",
+      "actual_channel": "#support-complaints",
+      "actual_risk_flags": [],
+      "final_state": "sent",
+      "human_rejection_count": 0,
+      "error": null
+    },
+    {
+      "ticket_id": "bitext-t10",
+      "description": "Bitext:contact_human_agent -> other (explicit human request \u2014 escalate by design)",
+      "expected_intent": "other",
+      "actual_intent": "other",
+      "intent_match": true,
+      "expected_outcome": "escalated",
+      "actual_outcome": "escalated",
+      "outcome_match": true,
+      "expected_channel": "#support-technical",
+      "actual_channel": "#support-technical",
+      "actual_risk_flags": [],
+      "final_state": "sent",
+      "human_rejection_count": 0,
+      "error": null
+    }
+  ]
+}

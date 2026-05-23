@@ -120,7 +120,7 @@ async def test_v4_faq_auto_sends_through_drafter_critic_loop(tmp_path, monkeypat
     drafter_calls = 0
     critic_calls = 0
 
-    async def fake_drafter_llm(payload):
+    async def fake_drafter_llm(payload, state=None):
         nonlocal drafter_calls
         drafter_calls += 1
         return {
@@ -128,7 +128,7 @@ async def test_v4_faq_auto_sends_through_drafter_critic_loop(tmp_path, monkeypat
             "draft_confidence": 0.95,
         }
 
-    async def fake_critic_llm(payload):
+    async def fake_critic_llm(payload, state=None):
         nonlocal critic_calls
         critic_calls += 1
         return {"verdict": "accept", "severity": 0.0, "feedback": ""}
@@ -204,14 +204,14 @@ async def test_v4_critic_revision_loop_fires_when_drafter_low_confidence(tmp_pat
     drafter_payloads = []
     critic_call = 0
 
-    async def fake_drafter_llm(payload):
+    async def fake_drafter_llm(payload, state=None):
         drafter_payloads.append(payload)
         return {
             "draft": f"Draft v{len(drafter_payloads)}",
             "draft_confidence": 0.95,
         }
 
-    async def fake_critic_llm(payload):
+    async def fake_critic_llm(payload, state=None):
         nonlocal critic_call
         critic_call += 1
         # First call: revise. Second: accept.
@@ -295,7 +295,7 @@ async def test_v4_refund_escalates_through_slack_then_resumes(tmp_path, monkeypa
     drafter_calls = 0
     critic_calls = 0
 
-    async def fake_drafter_llm(payload):
+    async def fake_drafter_llm(payload, state=None):
         nonlocal drafter_calls
         drafter_calls += 1
         return {
@@ -303,7 +303,7 @@ async def test_v4_refund_escalates_through_slack_then_resumes(tmp_path, monkeypa
             "draft_confidence": 0.91,
         }
 
-    async def fake_critic_llm(payload):
+    async def fake_critic_llm(payload, state=None):
         nonlocal critic_calls
         critic_calls += 1
         return {"verdict": "accept", "severity": 0.0, "feedback": ""}

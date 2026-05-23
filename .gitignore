@@ -61,6 +61,16 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 
+# Runtime SQLite — LangGraph checkpointer + MCP idempotency store. Never commit.
+data/checkpoints.sqlite
+data/checkpoints.sqlite-shm
+data/checkpoints.sqlite-wal
+data/checkpoints.sqlite-journal
+mcp_server/.email_idem.db
+mcp_server/.email_idem.db-shm
+mcp_server/.email_idem.db-wal
+mcp_server/.email_idem.db-journal
+
 # Flask stuff:
 instance/
 .webassets-cache

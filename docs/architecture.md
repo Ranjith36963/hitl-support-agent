@@ -384,6 +384,8 @@ send_retry_count: int                # increments on each transient send failure
 | `MAX_SEND_RETRIES` | 3 | Transient-failure retry cap before `failed_manual` |
 | `SLA_DEADLINE_HOURS` | 24 | Hours of human silence before SLA expires to Manual Queue |
 | `IMAP_POLL_INTERVAL_SEC` | 30 | Polling fallback when IMAP IDLE is unavailable |
+| `HOST` | `127.0.0.1` | FastAPI bind address. Loopback by default (bandit B104 safer default for dev). **Production / container deploys must set `HOST=0.0.0.0` explicitly** to accept external traffic. See `docs/threat_model.md` row A5. |
+| `PORT` | `8000` | FastAPI bind port. |
 
 ## LangSmith tagging
 
@@ -403,7 +405,7 @@ These tags drive the README's failure-slice table — break down accuracy by `in
 
 ## Eval data
 
-The eval suite runs against the **Bitext Customer Support dataset** (50-ticket sample: 40 dev / 10 holdout). Five evaluators run via LangSmith:
+The eval suite runs against **10 hand-curated tickets** — one per code path (`eval/dataset.py`), each exercising a distinct graph branch. A real 10-ticket Bitext eval has also been run (`eval/bitext_findings.md`, 10 of Bitext's 27 intents); a larger external sweep is future work. Five evaluators run via LangSmith:
 1. Intent accuracy (exact-match against labels)
 2. Response quality (LLM-as-judge with rubric)
 3. Escalation precision (did the two-gate router send to human correctly?)
@@ -428,7 +430,7 @@ The eval suite runs against the **Bitext Customer Support dataset** (50-ticket s
 | LLM client + LangSmith tracing decorators | `src/llm.py` |
 | ACME SaaS Co fictional policy corpus | `data/acme_policies.md` |
 | Mock customer DB (Salesforce-shape) | `data/customers_seed.json` |
-| Bitext eval dataset (50-ticket sample) | `data/bitext_sample.csv` |
+| Hand-curated eval dataset (10 tickets, one per code path) | `eval/dataset.py` |
 | Restart / resume integration test | `tests/test_resume.py` |
 
 ## Future work
@@ -483,11 +485,11 @@ Extends the v3 "How this maps to the codebase" table above. v4 agents share infr
 |---|---|
 | Shared agent infra — `get_llm()` (AsyncOpenAI to OpenRouter, same SDK as v3), `get_model_id(override_env)`, `load_prompt()`, `build_handoff_metadata()`, `get_client()` (delegates to `graph_runner.get_mcp_router`) | `src/agents/base.py` |
 | Researcher sub-graph — single-node compiled sub-graph; deterministic intent → MCP Read tool selection (full ReAct deferred to v4.1) | `src/agents/researcher.py` |
-| Drafter sub-graph — `drafter ⇄ critic` loop with `MAX_CRITIC_ITERATIONS = 2` hard cap; output shape preserves v3 contract (`original_draft`, `final_draft`, `draft_confidence`) | `src/agents/drafter.py` |
+| Drafter sub-graph — `drafter ⇄ critic` loop with `MAX_CRITIC_ITERATIONS = 3` hard cap; output shape preserves v3 contract (`original_draft`, `final_draft`, `draft_confidence`) | `src/agents/drafter.py` |
 | Critic agent — LLM judge with escalate-on-uncertainty fallback (malformed JSON → `verdict=revise`, `severity=0.5`); writes only allow-listed fields; severity clamped to `[0, 1]` | `src/agents/critic.py` |
 | System prompts (markdown, version-controlled) | `data/prompts/researcher_system.md` · `data/prompts/drafter_system.md` · `data/prompts/critic_system.md` |
 | Critic safety contract — 6 tests prove allow-list, severity clamp, monotonic confidence decrease, malformed-JSON fallback | `tests/test_critic_invariants.py` |
-| Drafter↔Critic loop hard cap — 3 tests prove the loop terminates at 2 iterations even when the Critic returns `revise` indefinitely | `tests/test_drafter_critic_loop.py` |
+| Drafter↔Critic loop hard cap — 3 tests prove the loop terminates at 3 iterations even when the Critic returns `revise` indefinitely | `tests/test_drafter_critic_loop.py` |
 | End-to-end smoke — 3 tests covering FAQ auto-send path, revise-then-accept loop, and Critic-triggered escalate path | `tests/test_v4_integration_smoke.py` |
 | 5 v4 evaluators — tool selection precision, critic disagreement rate, alignment with human edits, loop iteration distribution, per-agent cost breakdown | `eval/multiagent_evaluators.py` |
 | A/B Researcher-model swap experiment runner (DeepSeek vs Haiku-tier) | `eval/ab_model_swap.py` |

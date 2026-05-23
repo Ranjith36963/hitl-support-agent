@@ -58,6 +58,7 @@ inbound Gmail (IMAP IDLE)
 10. **Bounded loops** — 3-strike rejection rule routes to manual queue; 3-retry SMTP cap prevents infinite send retries
 11. **Stale-context revalidation** — on long approval pauses (>15 min), context is re-fetched, hash-compared, and a delta panel is posted to Slack so the approver re-decides with fresh info instead of a silent stale send
 12. **Durable resume across process restart** — kill the server mid-pause, restart it; the SQLite checkpointer survives, the Slack message buttons still resume on the right `slack_message_ts`
+13. **Production-readiness layer** — three-tier eval (behavior contracts / empirical with bootstrap CIs / adversarial pass-fail grid), STRIDE threat model with mitigation citing real file paths, GitHub Actions CI (ruff + mypy + pytest + pip-audit + bandit), `/metrics` Prometheus endpoint + **`docker compose up` brings a Grafana dashboard live at `localhost:3000`** (see [`deploy/README.md`](./deploy/README.md)), per-ticket cost telemetry. Methodology + gaps led not buried — see [`eval/METHODOLOGY.md`](./eval/METHODOLOGY.md) and [`docs/threat_model.md`](./docs/threat_model.md)
 
 ## Tech stack
 
@@ -108,9 +109,9 @@ v3 ships a single-drafter HITL workflow. **v4 adds three specialized agents** wh
 |---|---|---|
 | **Researcher Agent** | `enrich_context_node` | Decides which MCP Read tools to call by intent (FAQ → KB only; refund → all 3) |
 | **Drafter Agent** | `draft_response_node` | Writes the reply; integrates Critic feedback on revision |
-| **Critic Agent** *(NEW)* | — | Audits draft against policy + tone; can request up to **2 revisions** before exit |
+| **Critic Agent** *(NEW)* | — | Audits draft against policy + tone; can request **up to two revision passes** before exit (loop cap `MAX_CRITIC_ITERATIONS = 3` → Drafter runs at most 3×) |
 
-The outer graph is unchanged (still 15 nodes). Drafter and Critic run inside a bounded loop sub-graph (`MAX_CRITIC_ITERATIONS = 2`). See [`docs/v4_multiagent.md`](./docs/v4_multiagent.md) for the spec amendment.
+The outer graph is unchanged (still 15 nodes). Drafter and Critic run inside a bounded loop sub-graph (`MAX_CRITIC_ITERATIONS = 3`). See [`docs/v4_multiagent.md`](./docs/v4_multiagent.md) for the spec amendment.
 
 ### Hard invariants preserved (proven in code, not just docs)
 
@@ -127,23 +128,37 @@ MULTIAGENT_ENABLED=1 python -m src.server  # v4 multi-agent
 MULTIAGENT_ENABLED=0 python -m src.server  # v3 single-agent (comparison artifact — see below)
 ```
 
-> **Honest framing on v3 path:** v3 is retained as the **comparison artifact** for the v3-vs-v4 iteration story above (`eval/results_v3_live.json` vs `eval/results_v4_live.json`), **not** as a "production rollback" — this is a portfolio build with no live traffic, so calling it production-rollback would be cosplay. After the comparison has served its portfolio purpose, v3 path will be removed in v4.1 and `MULTIAGENT_ENABLED=1` becomes the default. Code-level deprecation marker is in `src/graph.py` next to the flag.
+> **Honest framing on v3 path:** v3 is retained as the **comparison artifact** for the v3-vs-v4 iteration story above, **not** as a "production rollback" — this is a portfolio build with no live traffic, so calling it production-rollback would be cosplay. **Both paths stay.** The head-to-head found v4 does **not** beat v3 — they tie — so `MULTIAGENT_ENABLED=0` (v3, the simpler path) stays the default. The A/B comparison *is* the deliverable; the honest tie is the result. See `src/graph.py` next to the flag, and `discussion.md` for the full audit.
 
 ### v3 vs v4 metrics (10 hand-curated tickets, live DeepSeek V3 via OpenRouter)
+
+_Refreshed 2026-05-18 through the de-rigged harness — real KB retrieval, no injected policy matches._
 
 | Metric | v3 | v4 | Δ |
 |---|---|---|---|
 | Intent accuracy | 70.0% | 70.0% | 0.0 pp |
-| Escalation precision | 100.0% | 90.0% | -10 pp *(see t07 below)* |
+| Escalation precision | 100.0% | 100.0% | 0.0 pp |
 | **`false_auto_send_rate`** | **0.0%** | **0.0%** | **unchanged (safety invariant)** ✅ |
-| Response quality (LLM-judge) | 4.30 / 5 | 4.30 / 5 | 0.00 |
+| Response quality (LLM-judge) | 4.50 / 5 | 4.10 / 5 | −0.40 (run-to-run noise) |
 | Cost per ticket | *deferred to v4.1* | *deferred to v4.1* | — |
 
 > **Cost row honestly deferred.** Per-call token + price instrumentation requires reading `resp.usage.prompt_tokens` / `completion_tokens` from every OpenAI response and accumulating with a per-model price table. That instrumentation is a v4.1 task (issue: v4.1-cost-tracking). The shortcut — hardcoding a model→price table or estimating from token counts alone — would produce numbers that drift the moment OpenRouter changes pricing. **No fake cost numbers in the README.**
 
-**Honest finding — what the Critic did:** Of 10 tickets, **1 flipped outcome under v4**. Ticket `eval-t07` ("technical question — basic_technical, high confidence") auto-sent under v3 and **escalated under v4**. The Critic lowered `draft_confidence` enough to push it below the 0.85 Gate 2 threshold. Whether this is *the Critic catching a nuance v3 missed* or *the Critic over-correcting on a safe case* needs more data than 10 tickets — but the safety metric (`false_auto_send_rate`) held at 0% in both versions. **The v4 Critic trades a small drop in escalation precision for an additional layer over every draft, without weakening the deterministic safety contract.**
+**Honest finding — what the Critic did:** nothing measurable. In the refreshed run v3 and v4 produced **identical outcomes on all 10 tickets** — same intents, same escalate/auto-send decisions. An earlier run (2026-05-09, before the harness was de-rigged) had recorded v4 over-escalating one ticket (`eval-t07`) and scoring 90% escalation precision. A fresh run did **not** reproduce that — `eval-t07` auto-sent correctly under v4. That single ticket was run-to-run LLM noise, not a structural v4 regression.
 
-Raw run artifacts: [`eval/results_v3_live.json`](./eval/results_v3_live.json) · [`eval/results_v4_live.json`](./eval/results_v4_live.json)
+**Honest bottom line: v4 did not beat v3.** Every metric is a tie or within noise. The response-quality gap (4.50 vs 4.10) is one LLM-judge run varying against another — a single live judge call per draft at n=10, where running v3 against itself twice would show comparable spread — and it points the *wrong* way for v4. The structural reason a v4 win is unlikely still holds: the Critic can only ever *lower* `draft_confidence` (`src/agents/critic.py` multiplies it by `1 - severity*0.5`, always in `[0.5, 1.0]`), so v4 escalates **≥** v3 on every ticket and cannot beat a v3 already at 100% escalation precision. The honest takeaway is the measurement discipline: the multi-agent version was built and evaluated head-to-head — twice, on hand-curated tickets and on real Bitext data — did not win, so the simpler path stays the default rather than being promoted on novelty. Full audit: [`discussion.md`](./discussion.md).
+
+**External cross-check — real Bitext data.** A second, independent eval on 10 real customer messages from the Bitext Customer Support dataset (run live through both versions) reached the same verdict: v3 and v4 produced identical outcomes on 9 of 10 tickets, and the one difference is run-to-run LLM noise on a node v4 does not even change. In that 2026-05-18 run intent accuracy fell to 50–60% on real external text (vs ~70% hand-curated) — but `false_auto_send_rate` held at 0% in both. Full write-up: [`eval/bitext_findings.md`](./eval/bitext_findings.md).
+
+**Honest caveat on `response_quality`.** The LLM-as-judge is the same provider+model family as the drafter (`gpt-4o-mini` judging `gpt-4o-mini` on OpenAI runs; same for DeepSeek-on-DeepSeek on prior OpenRouter runs). Same-family self-evaluation has known positive bias. `eval/cross_judge.py` partially mitigates by re-scoring with `gpt-4o`; a different-family judge (Claude / Gemini) would be a stronger signal — deferred until a non-OpenAI key is available. See [`eval/METHODOLOGY.md`](./eval/METHODOLOGY.md) "Judge bias".
+
+**Breadth eval — all 27 Bitext intents, the honest worst-case (2026-05-21).** The 10-intent eval was filtered to SaaS-mappable intents. The full 27-intent breadth eval — one ticket per intent, including out-of-domain e-commerce intents — is the harder test, and **both versions fail the primary safety metric** on it. v3 produces **6 dangerous false auto-sends** out of 27 (`false_auto_send_rate = 54.5%` of its 11 auto-sends). **v4 caught 5 of those 6**, reducing dangerous auto-sends to 1, but at the cost of 7 over-corrections (escalated drafts the user could have safely auto-sent). The one false auto-send v4 still misses (`registration_problems` classified as `FAQ`) is a classifier-confidently-wrong case the Critic architecturally cannot detect — it operates on the draft, not on the intent label. This is the multi-agent design's ceiling and the highest-EV target for the next round of work. Provider note: this run used **OpenAI `gpt-4o-mini`** after the OpenRouter free-tier credits ran out — new baseline, intentionally labeled. Full senior-architect write-up: [`eval/bitext27_findings.md`](./eval/bitext27_findings.md).
+
+**v4's first real win — the Critic-intercept eval (2026-05-19).** Every eval above grades escalate-vs-auto-send, an axis where v4's one-directional Critic is structurally capped. `eval/critic_intercept.py` finally measures v4 on its actual job — catching a flawed draft before a human sees it. Fed 5 deliberately-bad drafts and 5 good controls, the live Critic caught **4 of 5 bad drafts (80% intercept)** with **0 false alarms**. This is the first eval in the repo that credits the multi-agent layer on the axis it was built for. (One miss: an unsupported "you're an Enterprise customer" claim, accepted because no customer profile was supplied in the test state — see findings doc.)
+
+**Classifier improvement (2026-05-19).** The intent-classifier prompt was sharpened — clearer `FAQ`/`info`/`basic_technical` boundaries, a billing-vs-technical rule, typo robustness. A clean v3 Bitext re-run measured intent accuracy **50% → 70%** and escalation precision **90% → 100%**. The matched v4 re-run is **blocked on an OpenRouter credit top-up** — so `results_bitext_v3.json` (post-fix) and `results_bitext_v4.json` (pre-fix) are currently a mismatched pair; both files carry a ⚠️ banner. `classify_intent` is shared code that runs before the v3/v4 swap, so the same gain is expected for v4 — but that is reasoning, not yet a measurement.
+
+Raw run artifacts: [`results_curated_v3.json`](./eval/results_curated_v3.json) · [`results_curated_v4.json`](./eval/results_curated_v4.json) · [`results_bitext_v3.json`](./eval/results_bitext_v3.json) (post-prompt-fix, OpenRouter / DeepSeek V3) · [`results_bitext_v4.json`](./eval/results_bitext_v4.json) (pre-fix — re-run pending credits) · [`results_bitext27_v3.json`](./eval/results_bitext27_v3.json) (OpenAI gpt-4o-mini, 27-intent breadth) · [`results_bitext27_v4.json`](./eval/results_bitext27_v4.json) (OpenAI gpt-4o-mini, 27-intent breadth) · [`results_critic_intercept.json`](./eval/results_critic_intercept.json). The earlier `results_v3_live.json` / `results_v4_live.json` (2026-05-09) are kept as the subject of the `discussion.md` audit.
 
 **Multi-agent-specific evaluators** (`eval/multiagent_evaluators.py`) are wired but not yet aggregated into the v3-vs-v4 table — they require LangSmith run-tree introspection rather than the existing per-ticket harness:
 
@@ -167,26 +182,29 @@ Compares `tool_selection_precision` (does the cheaper model still pick the right
 ### Engineering choices documented honestly
 
 - **Researcher milestone-1 is deterministic, not full ReAct.** Same trace narrative at 1/3 the cost and zero risk of agent loops. Full ReAct upgrade is v4.1 follow-up — see comment block in `src/agents/researcher.py`.
-- **Critic loop hard cap is 2 iterations.** Test-asserted in `test_drafter_critic_loop.py`. Even when the Critic returns "revise" forever, the loop exits.
+- **Critic loop hard cap is 3 iterations** (up to 2 revision passes). Test-asserted in `test_drafter_critic_loop.py`. Even when the Critic returns "revise" forever, the loop exits.
 - **No new LLM dependency.** v4 uses the same SDK as v3 (`openai.AsyncOpenAI`) but through its own factory (`src/agents/base.get_llm()`), not by importing v3's client. Same library, parallel module — one OpenRouter integration class to debug, but the v4 agents do not have a runtime dependency on `src.nodes`. Module dependency arrow is v3→shared and v4→shared, never v4→v3.
 
 See [`demo/v4_critic_intercept.md`](./demo/v4_critic_intercept.md) for the agent-to-agent self-correction demo script.
 
-## Test coverage — 118 / 118 (87 v3 + 31 v4)
+## Test coverage — 136 / 136
 
 | Suite | Count | What it proves |
 |---|---:|---|
 | `test_resume.py` | 3 | Sync skeleton durability: pause, kill graph object, re-instantiate, resume |
-| `test_integration_smoke.py` | 3 | **Async production graph** end-to-end: refund-escalates-and-resumes, **async durability across simulated process restart**, FAQ-auto-sends. Implementation Rule 1 machine-verified — pre-interrupt nodes do NOT re-run on resume. |
+| `test_integration_smoke.py` | 3 | **Async production graph** end-to-end (v3 path): refund-escalates-and-resumes, **async durability across simulated process restart**, FAQ-auto-sends. Implementation Rule 1 machine-verified — pre-interrupt nodes do NOT re-run on resume. |
+| `test_v4_integration_smoke.py` | 3 | **Async production graph** end-to-end (v4 path): Researcher + Drafter↔Critic sub-graphs wire into the parent graph; FAQ auto-sends with all 3 v4 LLM call sites mocked |
 | `test_mcp_subprocess_boot.py` | 1 | All 3 MCP servers spawn cleanly via stdio handshake — catches Python 3.13 / import bugs |
 | `test_slack_handler.py` | 7 | HMAC signature: valid, replay defense (±5min), body-tamper detection, malformed input |
-| `test_policy.py` | 26 | Two-gate routing — every branch including Gate 2-skipped-when-Gate-1-fails |
-| `test_slack_router.py` | 21 | Priority overrides on 3 channels, `angry` always wins, intent fallthrough |
-| `test_pii.py` | 26 | Redact + restore round-trip identity, stable token reuse, multi-PII handling |
+| `test_policy.py` | 36 | Two-gate routing — every branch including Gate 2-skipped-when-Gate-1-fails |
+| `test_slack_router.py` | 18 | Priority overrides on 3 channels, `angry` always wins, intent fallthrough |
+| `test_pii.py` | 19 | Redact + restore round-trip identity, stable token reuse, multi-PII handling |
+| `test_email_idempotency.py` | 6 | Audit finding H2 — atomic idempotent send; re-running the graph cannot double-send |
+| `test_security_email_handling.py` | 12 | Audit findings C1/C2/H3 — reply to SMTP envelope-from (no `From:` spoofing), no PII in audit log |
 | **`test_agents_base.py`** | **5** | **v4: handoff metadata schema, prompt loader, AsyncOpenAI factory** |
 | **`test_researcher_agent.py`** | **3** | **v4: intent → tool selection (FAQ skips history; refund calls all 3)** |
-| **`test_critic_invariants.py`** | **5** | **v4: Critic CANNOT bypass gates / set send / mutate audit log; severity clamped to [0,1]** |
-| **`test_drafter_critic_loop.py`** | **3** | **v4: loop cap = 2 iterations even on infinite "revise"; respects accept verdict** |
+| **`test_critic_invariants.py`** | **6** | **v4: Critic CANNOT bypass gates / set send / mutate audit log; severity clamped to [0,1]** |
+| **`test_drafter_critic_loop.py`** | **3** | **v4: loop cap = 3 iterations (up to two revision passes) even on infinite "revise"; respects accept verdict** |
 | **`test_v4_integration.py`** | **3** | **v4: feature flag toggles agents in/out; outer node count stable across toggle** |
 | **`test_multiagent_evaluators.py`** | **8** | **v4: 5 evaluators handle empty/typical/mismatch inputs** |
 
@@ -222,7 +240,7 @@ cp .env.example .env
 
 ```bash
 pip install -r requirements.txt
-pytest                                # 118 / 118 should pass (v3+v4)
+pytest                                # 136 / 136 should pass (v3+v4)
 python -m eval.run_experiments --no-llm   # routing eval (no creds needed)
 ```
 
@@ -262,7 +280,7 @@ docs/   architecture.md
 - **v1 / v2 ablations** — would need separate graph variants run on the same dataset; cut to fit the build window and avoid any temptation to invent numbers
 - **Demo videos** — durable-execution kill-restart, approve-with-edits, SLA timeout. Scripts ready (see [`spec.md`](./spec.md) §13); recording happens after secrets land
 - **6 Slack channels → 3** — `#support-legal`, `#support-enterprise`, `#support-billing` are config additions to `slack_router.py`, not architecture changes
-- **Bitext 50 → 10 hand-curated** — one ticket per code path is more diagnostic than 50 random samples for routing logic; full Bitext sweep is straightforward to add
+- **External-benchmark eval (Bitext)** — a real 10-ticket Bitext eval now exists: 10 of Bitext's SaaS-adjacent intents, run live through both v3 and v4 (`eval/bitext_dataset.py`, data frozen in `data/bitext_eval_10.csv`, full write-up in [`eval/bitext_findings.md`](./eval/bitext_findings.md)). It confirmed v3≈v4 and showed intent accuracy drops to 50–60% on real external text vs ~70–100% on the hand-curated set. Still partial — 10 of Bitext's 27 intents, n=10; a larger holdout sweep remains future work
 - **Postgres production checkpointer** — SQLite is sufficient for single-writer demo; AsyncPostgresSaver is a one-line swap
 - **Webhook-based inbound mail** — IMAP IDLE works for demo; SES / SendGrid Parse / Postmark for production scale
 - **Online evals** — current 10-ticket eval is offline; sampling layer over live traces is future work
@@ -278,6 +296,8 @@ docs/   architecture.md
 | [`docs/v3_completion_status.md`](./docs/v3_completion_status.md) | **v3 frozen status snapshot** — captured the day v4 began; phase % and gaps |
 | [`docs/v4_multiagent.md`](./docs/v4_multiagent.md) | **v4 spec amendment** — Researcher + Drafter↔Critic architecture lock + invariants |
 | [`docs/superpowers/plans/2026-05-09-v4-multiagent.md`](./docs/superpowers/plans/2026-05-09-v4-multiagent.md) | **v4 implementation plan** — 10 TDD tasks, full code in each step |
+| [`eval/METHODOLOGY.md`](./eval/METHODOLOGY.md) | **Eval methodology** — three layers (contracts/empirical/adversarial), CIs, what's deferred |
+| [`docs/threat_model.md`](./docs/threat_model.md) | **STRIDE threat model** — asset list + per-threat existing mitigation + honest residual-risk register |
 | [`CLAUDE.md`](./CLAUDE.md) | Project memory — invariants and non-negotiable rules |
 
 ---

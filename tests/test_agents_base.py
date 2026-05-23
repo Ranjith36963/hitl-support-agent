@@ -50,8 +50,16 @@ def test_load_prompt_reads_markdown_file(tmp_path, monkeypatch):
     assert load_prompt("test_system") == "You are a test agent."
 
 
-def test_get_llm_returns_async_client():
-    """get_llm() returns an AsyncOpenAI client (consistent with src/llm.py)."""
+def test_get_llm_returns_async_client(monkeypatch):
+    """get_llm() returns an AsyncOpenAI client (consistent with src/llm.py).
+
+    CI runs without secrets (OPENROUTER_API_KEY="" / OPENAI_API_KEY="" in
+    .github/workflows/ci.yml), and the newer openai SDK rejects empty
+    api_key strings at client construction. Set a sentinel value so this
+    test exercises the factory (not the auth path).
+    """
     from openai import AsyncOpenAI
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-placeholder")
     client = get_llm()
     assert isinstance(client, AsyncOpenAI)
