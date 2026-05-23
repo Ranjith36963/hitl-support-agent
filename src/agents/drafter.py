@@ -63,7 +63,8 @@ async def _llm_draft(
     finally:
         LLM_LATENCY.labels(call="drafter").observe(time.monotonic() - start)
     track_llm_usage(state, "drafter", model, getattr(resp, "usage", None))
-    return json.loads((resp.choices[0].message.content or "").strip())
+    parsed: dict[str, Any] = json.loads((resp.choices[0].message.content or "").strip())
+    return parsed
 
 
 @traceable(run_type="chain", name="drafter_agent")

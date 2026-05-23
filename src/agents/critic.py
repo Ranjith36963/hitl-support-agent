@@ -64,7 +64,8 @@ async def _llm_judge(
     track_llm_usage(state, "critic", model, getattr(resp, "usage", None))
     raw = (resp.choices[0].message.content or "").strip()
     try:
-        return json.loads(raw)
+        parsed: dict[str, Any] = json.loads(raw)
+        return parsed
     except json.JSONDecodeError:
         # Escalate-on-uncertainty — Critic failure must NOT auto-pass. Lowering
         # draft_confidence (via severity 0.5) routes to Gate 2 → human review.

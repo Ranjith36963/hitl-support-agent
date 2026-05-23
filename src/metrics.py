@@ -147,19 +147,18 @@ def _TEST_RESET() -> None:
         # Labeled-metric path: clear the per-label-tuple sample dict.
         # We always attempt this; for unlabeled metrics the dict is empty.
         if hasattr(metric, "_metrics"):
-            metric._metrics.clear()  # type: ignore[attr-defined]
-        # Unlabeled-metric path: prometheus_client stores accumulators
+            metric._metrics.clear()        # Unlabeled-metric path: prometheus_client stores accumulators
         # directly on the wrapper. Counter has `_value`; Histogram has
         # `_sum` + `_buckets`. The public `clear()` method errors on
         # unlabeled metrics in prometheus_client≥0.21 (missing _lock),
         # so we reset the private state directly. Test-only path; the
         # coupling is acceptable.
         if hasattr(metric, "_value"):
-            metric._value.set(0)  # type: ignore[attr-defined]
+            metric._value.set(0)
         if hasattr(metric, "_sum"):
-            metric._sum.set(0)  # type: ignore[attr-defined]
+            metric._sum.set(0)
         if hasattr(metric, "_buckets"):
-            for bucket in metric._buckets:  # type: ignore[attr-defined]
+            for bucket in metric._buckets:
                 bucket.set(0)
 
 

@@ -86,9 +86,9 @@ def track_llm_usage(
     # through to 0 — same outcome as "no usage info available".
     raw_prompt = getattr(usage, "prompt_tokens", 0)
     raw_completion = getattr(usage, "completion_tokens", 0)
-    prompt_tokens = raw_prompt if isinstance(raw_prompt, (int, float)) else 0
-    completion_tokens = (
-        raw_completion if isinstance(raw_completion, (int, float)) else 0
+    prompt_tokens: int = int(raw_prompt) if isinstance(raw_prompt, (int, float)) else 0
+    completion_tokens: int = (
+        int(raw_completion) if isinstance(raw_completion, (int, float)) else 0
     )
 
     # Prometheus token counters fire on every LLM call — independent of
@@ -294,7 +294,13 @@ async def _chat_json(
     model = _model()
     start = time.monotonic()
     try:
-        resp = await _client().chat.completions.create(
+        # The OpenAI SDK's overloads on `create` require TypedDict-shaped
+        # messages and response_format. The plain-dict literals below are
+        # what the API actually expects; mypy strict mode can't narrow
+        # `dict[str, str]` to ResponseFormatJSONObjectParam without an
+        # explicit cast or a typed param. The call-overload ignore is the
+        # honest workaround — no behaviour change.
+        resp = await _client().chat.completions.create(  # type: ignore[call-overload]
             model=model,
             messages=messages,
             response_format={"type": "json_object"},
@@ -304,7 +310,8 @@ async def _chat_json(
         LLM_LATENCY.labels(call=label).observe(time.monotonic() - start)
     track_llm_usage(state, label, model, getattr(resp, "usage", None))
     content = (resp.choices[0].message.content or "").strip()
-    return json.loads(content)
+    parsed: dict[str, Any] = json.loads(content)
+    return parsed
 
 
 @traceable(run_type="llm", name="classify_intent")

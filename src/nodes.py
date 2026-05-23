@@ -344,7 +344,7 @@ def _customer_email_from_audit(state: AgentState) -> str:
             tm_legacy = entry.get("token_map") or {}
             for token, original in tm_legacy.items():
                 if token.startswith("[EMAIL_"):
-                    return original
+                    return str(original)
     return "unknown@example.com"
 
 

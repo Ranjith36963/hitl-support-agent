@@ -37,14 +37,6 @@ jobs:
         run: ruff check .
 
       - name: Mypy (strict types on src + mcp_server)
-        # TEMPORARY: mypy was configured strict in pyproject.toml but never
-        # enforced by CI, so the codebase has accumulated ~19 strict-mode
-        # findings (no-any-return, union-attr, type-arg). `continue-on-error`
-        # lets us surface them in CI logs without blocking the pipeline; a
-        # follow-up commit removes this flag once each finding is fixed
-        # individually. Tracking in: rippling-soaring-sutherland.md, "mypy
-        # cleanup" task.
-        continue-on-error: true
         run: mypy
 
       - name: Pytest (unit + integration, mocked LLM)

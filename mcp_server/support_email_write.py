@@ -209,7 +209,7 @@ async def _smtp_send(msg: EmailMessage) -> str:
         start_tls=True,
     )
     # Message-ID was set before send; return it as the stable sent_message_id
-    return msg["Message-ID"]
+    return str(msg["Message-ID"])
 
 
 # ---------------------------------------------------------------------------

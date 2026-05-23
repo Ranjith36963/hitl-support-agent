@@ -168,23 +168,23 @@ def _thread_id_from_body(body: dict[str, Any]) -> str:
     if actions:
         first = actions[0]
         # 1. button value — most reliable, explicitly set by us
-        value = first.get("value", "")
+        value = str(first.get("value", ""))
         if value.startswith("ticket-"):
             return value
         # 2. block_id on the actions block
-        block_id = first.get("block_id", "")
+        block_id = str(first.get("block_id", ""))
         if block_id.startswith("ticket-"):
             return block_id
     # 3. metadata fallback
     msg = body.get("message", {})
     metadata = msg.get("metadata", {}).get("event_payload", {})
-    return metadata.get("thread_id", "")
+    return str(metadata.get("thread_id", ""))
 
 
 def _draft_from_body(body: dict[str, Any]) -> str:
     msg = body.get("message", {})
     metadata = msg.get("metadata", {}).get("event_payload", {})
-    return metadata.get("draft", "")
+    return str(metadata.get("draft", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +265,7 @@ async def run_socket_mode() -> None:
     settings.require_secrets("slack_bot_token", "slack_app_token", "slack_signing_secret")
     app = get_app()
     handler = AsyncSocketModeHandler(app, settings.slack_app_token)
-    await handler.start_async()
+    await handler.start_async()  # type: ignore[no-untyped-call]
 
 
 if __name__ == "__main__":

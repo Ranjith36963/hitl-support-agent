@@ -125,7 +125,7 @@ def compile_with_checkpointer(checkpointer: SqliteSaver) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def build_full_graph_builder() -> StateGraph:
+def build_full_graph_builder() -> StateGraph[AgentState]:
     """Construct the production graph per spec.md §6 + CLAUDE.md flow.
 
     Slack post BEFORE interrupt — Implementation Rule 1. interrupt_gate is a

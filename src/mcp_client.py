@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import pathlib
 import sys
+from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any
 
@@ -365,7 +366,9 @@ class MCPClientRouter:
 
 
 @asynccontextmanager
-async def _make_session(python: str, script_path: str):
+async def _make_session(
+    python: str, script_path: str
+) -> AsyncIterator[ClientSession]:
     """Open a stdio_client transport → ClientSession for *script_path*.
 
     Yields an initialized ClientSession ready for tool calls.
@@ -398,6 +401,7 @@ if __name__ == "__main__":
 
     async def _smoke() -> None:
         async with MCPClientRouter() as router:
+            assert router.read is not None  # smoke entry assumes lifecycle init
             profile = await router.read.get_crm_profile("test@example.com")
             print("CRM profile:", profile)
             history = await router.read.get_customer_history("test@example.com")

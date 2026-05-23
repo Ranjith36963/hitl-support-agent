@@ -48,15 +48,22 @@ def _decode_header(raw: str | bytes | None) -> str:
 
 
 def _extract_body(msg: stdlib_email.message.Message) -> str:
+    # `get_payload(decode=True)` is typed `Message | bytes | Any | None` by
+    # stdlib stubs. With decode=True it really only returns bytes-or-None;
+    # cast / isinstance-narrow before calling `.decode`.
     if msg.is_multipart():
         for part in msg.walk():
             ctype = part.get_content_type()
             if ctype == "text/plain" and "attachment" not in str(part.get("Content-Disposition", "")):
                 payload = part.get_payload(decode=True) or b""
+                if not isinstance(payload, bytes):
+                    continue
                 charset = part.get_content_charset() or "utf-8"
                 return payload.decode(charset, errors="replace")
         return ""
     payload = msg.get_payload(decode=True) or b""
+    if not isinstance(payload, bytes):
+        return ""
     charset = msg.get_content_charset() or "utf-8"
     return payload.decode(charset, errors="replace")
 
