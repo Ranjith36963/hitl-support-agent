@@ -1,6 +1,6 @@
 # Advisor-Hardened Build Plan — HITL Customer Support Agent
 
-> **Scope note:** this is the **v3 build plan** (single-agent, ship-on-day-1). The v4 multi-agent amendment built on top of it lives in [`docs/v4_multiagent.md`](./docs/v4_multiagent.md) with implementation tasks in [`docs/superpowers/plans/2026-05-09-v4-multiagent.md`](./docs/superpowers/plans/2026-05-09-v4-multiagent.md). A frozen v3 status snapshot taken the day v4 began is in [`docs/v3_completion_status.md`](./docs/v3_completion_status.md).
+> **Scope note:** this is the **v3 build plan** (single-agent, ship-on-day-1). The v4 multi-agent amendment built on top of it lives in [`docs/v4_multiagent.md`](./docs/v4_multiagent.md). A frozen v3 status snapshot taken the day v4 began is in [`docs/v3_completion_status.md`](./docs/v3_completion_status.md).
 
 > 6-10 hour delegated build plan. Reviewed by advisor model. Honest scope, hard cuts, named critical path.
 

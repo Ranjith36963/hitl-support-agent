@@ -54,13 +54,12 @@
 
 - ✅ **Tag v3.0** before v4 work modifies live nodes — gives a clean rollback target
 - ✅ **Commit v3 codebase as one milestone** — preserves the "single-agent baseline" identity required for v3-vs-v4 README comparison table
-- ✅ **Then proceed with v4** — `docs/v4_multiagent.md` (architecture lock) + `docs/superpowers/plans/2026-05-09-v4-multiagent.md` (10-task TDD plan)
+- ✅ **Then proceed with v4** — `docs/v4_multiagent.md` (architecture lock)
 - ⚠️ **Demo recordings deferred until user provisions `.env`** — not a blocker for v4 architecture work, but a blocker for portfolio-shipped state
 
 ## What this doc is NOT
 
 - Not a spec amendment — `docs/v4_multiagent.md` is that
-- Not an execution plan — `docs/superpowers/plans/2026-05-09-v4-multiagent.md` is that
 - Not a transition plan — v4 is feature-flagged additive; the "transition" is one env var change (`MULTIAGENT_ENABLED=1`)
 
 This doc is the **frozen state of v3** at the moment v4 implementation begins. It will not be updated again — if v3 changes after this date, the change goes in a v3 changelog, not here.

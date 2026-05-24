@@ -238,7 +238,9 @@ This is the most serious finding.
 - `CLAUDE.md` — folder layout lists a file `data/  bitext_sample.csv`.
 - The string "bitext" also appears in `README.md`, `spec.md`, `adviserplan.md`,
   `HOW_IT_WORKS.md`, `docs/architecture.md`, `docs/v4_multiagent.md`,
-  `docs/superpowers/plans/2026-05-09-v4-multiagent.md`.
+  and previously in `docs/superpowers/plans/2026-05-09-v4-multiagent.md`
+  (that file was removed from the public repo on 2026-05-24 — see git
+  history for the v4 task-by-task plan).
 
 ### 5.2 What is actually in the repo (verified)
 
@@ -312,9 +314,12 @@ An independent advisor review was run on this decision. Its conclusion:
 > a first batch and part of item 2: the rigged KB injection was removed and the
 > result files now self-identify. **Still open:** the rest of item 2
 > (adversarial tickets, v4-value metrics), a larger Bitext sweep, and item 5.
-> The frozen dated plan docs (`adviserplan.md`, `docs/superpowers/plans/*`)
-> were intentionally left untouched — they are historical records of plans,
-> not present-tense claims, so rewriting them would itself falsify history.
+> The frozen dated plan docs (`adviserplan.md`, and previously the agent-
+> execution plans under `docs/superpowers/plans/` — removed from the
+> public repo on 2026-05-24, see git history) were intentionally left
+> untouched at the time of this audit — they are historical records of
+> plans, not present-tense claims, so rewriting them would itself
+> falsify history.
 
 Ordered by urgency.
 

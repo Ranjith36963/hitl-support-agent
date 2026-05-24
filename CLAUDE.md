@@ -18,7 +18,6 @@
 | `docs/architecture.md` | Diagrams, env-var table, sequence, state machine, codebase map, LangSmith tag table — includes v4 sub-graph section |
 | `HOW_IT_WORKS.md` | End-to-end product narrative — Jamie example (v3) + "How v4 changes this story" appended |
 | `docs/v4_multiagent.md` | v4 spec amendment — architecture lock + hard invariants |
-| `docs/superpowers/plans/2026-05-09-v4-multiagent.md` | v4 TDD implementation plan (10 tasks, full code) |
 | `docs/v3_completion_status.md` | Frozen v3 status snapshot taken the day v4 began |
 | `adviserplan.md` | v3 build plan (advisor-hardened 6-10h delegation plan) |
 

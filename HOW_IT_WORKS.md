@@ -303,6 +303,5 @@ Jamie's experience is identical to the v3 walkthrough. Her phone still buzzes wi
 ### Cross-links
 
 - Architecture lock + invariants: `docs/v4_multiagent.md`
-- Implementation plan: `docs/superpowers/plans/2026-05-09-v4-multiagent.md`
 - Raw eval artifacts: `eval/results_v4_live.json` vs `eval/results_v3_live.json`
 - Code: `src/agents/{researcher,drafter,critic}.py`
