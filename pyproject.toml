@@ -35,11 +35,6 @@ classifiers = [
     "Topic :: Communications :: Email",
 ]
 
-[project.urls]
-Homepage = "https://github.com/Ranjith36963/hitl-support-agent"
-Repository = "https://github.com/Ranjith36963/hitl-support-agent"
-Issues = "https://github.com/Ranjith36963/hitl-support-agent/issues"
-
 # Runtime dependencies mirror `requirements.txt`. Required for `python -m build`
 # to produce a wheel/sdist that actually installs its deps from PyPI; without
 # this block, `pip install hitl-support-agent` from a wheel would install zero
@@ -67,6 +62,11 @@ dependencies = [
     "pandas>=2.2.0",
     "datasets>=3.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Ranjith36963/hitl-support-agent"
+Repository = "https://github.com/Ranjith36963/hitl-support-agent"
+Issues = "https://github.com/Ranjith36963/hitl-support-agent/issues"
 
 [project.optional-dependencies]
 # Install with: pip install -e .[dev]
