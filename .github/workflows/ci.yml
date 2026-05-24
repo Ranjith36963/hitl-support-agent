@@ -26,12 +26,20 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: |
+            requirements.txt
+            pyproject.toml
 
       - name: Install dependencies
+        # Editable install + [dev] extras: pulls runtime deps from
+        # requirements.txt (via setuptools resolving pyproject) plus the
+        # test/lint/security tooling from [project.optional-dependencies].dev.
+        # Dev tooling was moved out of requirements.txt on 2026-05-24 so
+        # container images don't ship it (see commit b15a05c).
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install -e .[dev]
 
       - name: Ruff (lint)
         run: ruff check .
