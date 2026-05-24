@@ -57,9 +57,15 @@ jobs:
         run: pytest -q
 
       - name: Pip-audit (dependency CVEs)
-        # Fail-hard on any unresolved vuln. If a finding has no upgrade path,
-        # pin via a comment in requirements.txt and add --ignore-vuln here.
-        run: pip-audit --strict
+        # Audit ONLY the requirements file. Without `-r`, pip-audit tries to
+        # look up every installed package on PyPI including our own
+        # `hitl-support-agent` editable install (added on 2026-05-24 to pull
+        # in the [dev] extras), which 404s. `-r requirements.txt` restricts
+        # the audit to real runtime deps — which is the actual security
+        # surface anyway. Fail-hard on any unresolved vuln; if a finding has
+        # no upgrade path, pin via a comment in requirements.txt and add
+        # --ignore-vuln here.
+        run: pip-audit --strict -r requirements.txt
 
       - name: Bandit (static security scan on src + mcp_server)
         # `-ll` raises the minimum severity reported. `-c pyproject.toml` picks
