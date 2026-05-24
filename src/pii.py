@@ -193,7 +193,9 @@ def _reset_sidecar_for_tests() -> None:
     if _SIDECAR_CONN is not None:
         try:
             _SIDECAR_CONN.close()
-        except Exception:  # noqa: BLE001
+        except sqlite3.ProgrammingError:
+            # Connection was already closed by something else (test teardown
+            # ordering edge case). Safe to ignore at this scope.
             pass
     _SIDECAR_CONN = None
     _SIDECAR_INITED = False

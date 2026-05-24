@@ -6,7 +6,51 @@ build-backend = "setuptools.build_meta"
 name = "hitl-support-agent"
 version = "0.1.0"
 description = "Production-Grade Human-in-the-Loop Customer Support Agent with Evaluation & Durable Execution"
+readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.11"
+authors = [
+    { name = "Ranjith Maliga Guruprakash", email = "ranjithmaligaguruprakash@gmail.com" },
+]
+keywords = [
+    "langgraph",
+    "human-in-the-loop",
+    "hitl",
+    "customer-support",
+    "llm",
+    "mcp",
+    "agent",
+    "slack",
+    "gmail",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Communications :: Email",
+]
+
+[project.urls]
+Homepage = "https://github.com/Ranjith36963/hitl-support-agent"
+Repository = "https://github.com/Ranjith36963/hitl-support-agent"
+Issues = "https://github.com/Ranjith36963/hitl-support-agent/issues"
+
+[project.optional-dependencies]
+# Install with: pip install -e .[dev]
+# Kept out of requirements.txt so Docker images don't ship test + lint tooling.
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "mypy>=1.13.0",
+    "ruff>=0.7.0",
+    "pip-audit>=2.7.0",
+    "bandit>=1.7.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

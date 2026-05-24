@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -65,6 +66,8 @@ from src.pii import (
 from src.policy import gate_one_policy_risk, should_auto_send
 from src.slack_router import route_channel
 from src.state import AgentState
+
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -840,8 +843,11 @@ async def audit_log_node(state: AgentState) -> dict[str, Any]:
                     text=text,
                 )
             )
-        except Exception:
-            pass  # best-effort — not blocking the audit close
+        except (RuntimeError, OSError, ValueError) as exc:
+            # Best-effort: a Slack outage / network blip / serialization error
+            # must NOT block the audit close — the ticket is already sent.
+            # Log so it's visible in LangSmith, but swallow.
+            log.warning("audit_log Slack update failed (non-fatal): %s", exc)
 
     ticket_id = state.get("ticket_id", "")
     if ticket_id:
@@ -882,8 +888,12 @@ async def manual_queue_node(state: AgentState) -> dict[str, Any]:
                     text=notice,
                 )
             )
-        except Exception:
-            pass
+        except (RuntimeError, OSError, ValueError) as exc:
+            # Best-effort: terminal-state Slack notice must NOT keep the
+            # ticket from closing into manual_queue. The fail state is
+            # already recorded in audit_log; the Slack message is a UX
+            # nicety, not a correctness contract.
+            log.warning("manual_queue Slack update failed (non-fatal): %s", exc)
 
     ticket_id = state.get("ticket_id", "")
     if ticket_id:

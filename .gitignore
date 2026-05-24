@@ -61,11 +61,20 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 
-# Runtime SQLite — LangGraph checkpointer + MCP idempotency store. Never commit.
+# Runtime SQLite — LangGraph checkpointer + MCP idempotency store + PII vault.
+# Generic *.sqlite* covers all SQLite sidecar files (data/pii_vault.sqlite added
+# 2026-05-24); explicit paths kept for clarity.
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite-journal
 data/checkpoints.sqlite
 data/checkpoints.sqlite-shm
 data/checkpoints.sqlite-wal
 data/checkpoints.sqlite-journal
+data/pii_vault.sqlite
+data/pii_vault.sqlite-shm
+data/pii_vault.sqlite-wal
 mcp_server/.email_idem.db
 mcp_server/.email_idem.db-shm
 mcp_server/.email_idem.db-wal
@@ -162,6 +171,9 @@ activemq-data/
 
 # Environments
 .env
+.env.local
+.env.production
+.env.*.local
 .envrc
 .venv
 env/
@@ -195,11 +207,7 @@ dmypy.json
 cython_debug/
 
 # PyCharm
-#   JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#   be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#   and can be added to the global gitignore or merged into this file.  For a more nuclear
-#   option (not recommended) you can uncomment the following to ignore the entire idea folder.
-# .idea/
+.idea/
 
 # Abstra
 #   Abstra is an AI-powered process automation framework.
@@ -208,13 +216,22 @@ cython_debug/
 .abstra/
 
 # Visual Studio Code
-#   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
-#   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#   and can be added to the global gitignore or merged into this file. However, if you prefer, 
-#   you could uncomment the following to ignore the entire vscode folder
-# .vscode/
+.vscode/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
+
+# OS-specific noise
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# Editor swap / backup files
+*.swp
+*.swo
+*~
+*.bak
+*.orig
 
 # Ruff stuff:
 .ruff_cache/

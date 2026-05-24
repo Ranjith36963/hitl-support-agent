@@ -106,9 +106,11 @@ it has not yet been *seen* doing so in the wild.
   judgements**. Bitext does not label auto-send vs escalate.
 - **n = 10 — no statistical power.** One ticket = 10 percentage points.
 
-## Results — clean run (all 10 tickets completed, no rate-limit errors)
+## Results — pre-fix baseline (the 2026-05-18 v4 run, before the classifier-prompt fix above)
 
-| Metric | v3 | v4 |
+**These numbers are kept as the historical baseline so the "2026-05-19 update" delta near the top of this file remains diffable. The current authoritative numbers are in the table at the top of this file (post-fix: v3 = 70% intent / 100% escalation / 4.30 response quality on `results_bitext_v3.json`).** v4's matched re-run did not complete because of the OpenRouter HTTP 402 blocker — `results_bitext_v4.json` still reflects this pre-fix run.
+
+| Metric | v3 (pre-fix) | v4 (pre-fix) |
 |---|---|---|
 | Intent accuracy | 50% (5/10) | 60% (6/10) |
 | Escalation precision | 90% | 90% |

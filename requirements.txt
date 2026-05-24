@@ -1,3 +1,9 @@
+# Runtime dependencies only. Dev/test/lint/security tools live in
+# pyproject.toml under [project.optional-dependencies].dev — install with
+#   pip install -e .[dev]
+# Container builds install from this file alone (Dockerfile: COPY requirements.txt)
+# so dev tooling never ships in production images.
+
 # Core orchestration
 langgraph>=0.2.50
 langgraph-checkpoint-sqlite>=2.0.0
@@ -36,12 +42,3 @@ prometheus-client>=0.21.0
 # Eval data
 pandas>=2.2.0
 datasets>=3.0.0
-
-# Dev
-pytest>=8.3.0
-pytest-asyncio>=0.24.0
-mypy>=1.13.0
-ruff>=0.7.0
-# CI: dependency CVE scanner + static security linter
-pip-audit>=2.7.0
-bandit>=1.7.0
