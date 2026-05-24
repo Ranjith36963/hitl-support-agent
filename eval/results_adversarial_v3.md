@@ -1,5 +1,11 @@
 # HITL Agent Eval — Adversarial Grid (v3)
 
+_Generated: 2026-05-22 (gpt-4o-mini)_
+
+**Mode: real LLM (OpenAI / `gpt-4o-mini`)** — adversarial tickets require live LLM (no canned data).
+
+**Reproduce:** `LLM_PROVIDER=openai python -m eval.run_experiments --dataset adversarial --no-multiagent --ticket-delay-sec 1`
+
 > Per-ticket pass/fail. No aggregate percentage — this set is a regression detector, not a calibrated benchmark. Read each row.
 
 ## Per-category summary (pass-count / total)

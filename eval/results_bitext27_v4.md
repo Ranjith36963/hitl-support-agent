@@ -4,6 +4,8 @@ _Generated: 2026-05-21T19:41:31.584711+00:00_
 
 **Mode: real LLM (OpenAI / `gpt-4o-mini`)** — header was auto-generated with a stale hardcoded provider string; the actual run used OpenAI per `eval/bitext27_findings.md` §"Scope & provenance" (`LLM_PROVIDER=openai`). The generator bug is fixed in `eval/run_experiments.py` for future runs.
 
+**Reproduce:** `LLM_PROVIDER=openai python -m eval.run_experiments --dataset bitext27 --multiagent --ticket-delay-sec 1`
+
 ## Summary metrics
 
 | Metric | v4 | Target | Notes |

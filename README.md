@@ -1,8 +1,17 @@
 # HITL Customer Support Agent
 
-> Production-grade Human-in-the-Loop customer support agent with durable execution, multi-channel Slack approval routing, three capability-isolated MCP servers, and real Gmail I/O. Built on LangGraph + LangSmith.
+[![CI](https://github.com/Ranjith36963/hitl-support-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Ranjith36963/hitl-support-agent/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](pyproject.toml)
+[![Tests](https://img.shields.io/badge/tests-148%2F148-brightgreen)](#test-coverage--148--148)
 
-**Status:** v3 architecture shipped end-to-end. **v4 multi-agent layer (Researcher + Drafter ↔ Critic) shipped behind `MULTIAGENT_ENABLED` flag** (default `1` since 2026-05-23 — see CLAUDE.md). **Total: 148 / 148 tests passing in both `MULTIAGENT_ENABLED=0` and `=1` modes** (including 6 Critic-invariant tests, 3 v4 integration smokes, 3 PII vault sidecar tests). **Live LLM eval complete** — both v3 and v4 hold `false_auto_send_rate = 0%` against 10 hand-curated tickets via DeepSeek V3 on OpenRouter; on the 27-intent Bitext breadth set both currently fail safety (v3=54.5%, v4=50% of auto-sends wrong; absolute count fell 6 → 1 — full numbers in `eval/bitext27_findings.md`). v4 Critic flipped 1 ticket from auto_send → escalated (Gate 2 threshold tightening) on the curated set — see the [v4 section](#v4--multi-agent-iteration). Demo recordings remain user-action items.
+A customer-support agent that drafts replies with an LLM but pauses for a human on Slack whenever the stakes are real — refunds, angry customers, policy edge cases. Built on LangGraph with real Gmail and real Slack (no mocks for the I/O layer), three capability-isolated MCP tool servers, and a measured `false_auto_send_rate = 0%` on the curated eval. Architecture, threat model, and head-to-head v3-vs-v4 multi-agent eval are all in the repo — no fake metrics.
+
+![End-to-end flow](docs/hitl-flow.png)
+
+**Status:** v3 single-agent + v4 multi-agent (Researcher + Drafter↔Critic) both shipped behind `MULTIAGENT_ENABLED` flag (default `1` since 2026-05-23 — v4 caught 5/6 dangerous false auto-sends v3 missed on the 27-intent Bitext breadth set; see [`eval/bitext27_findings.md`](./eval/bitext27_findings.md)). **148 / 148 tests passing in both flag modes** (6 Critic-invariant tests, 3 v4 integration smokes, 3 PII vault sidecar tests). Live LLM eval: both versions hold `false_auto_send_rate = 0%` on 10 hand-curated + 10 Bitext tickets; on the 27-intent breadth set both currently fail safety (v3=54.5%, v4=50% of auto-sends wrong; absolute count fell 6 → 1). Demo recordings remain user-action items.
+
+**Looking for the high-trust artifacts?** Architecture: [`docs/architecture.md`](./docs/architecture.md) · Threat model: [`docs/threat_model.md`](./docs/threat_model.md) · Eval methodology: [`eval/METHODOLOGY.md`](./eval/METHODOLOGY.md) · Contributing: [`CONTRIBUTING.md`](./CONTRIBUTING.md) · Security disclosure: [`SECURITY.md`](./SECURITY.md).
 
 ---
 
@@ -150,7 +159,7 @@ _Refreshed 2026-05-18 through the de-rigged harness — real KB retrieval, no in
 
 **External cross-check — real Bitext data.** A second, independent eval on 10 real customer messages from the Bitext Customer Support dataset (run live through both versions) reached the same verdict: v3 and v4 produced identical outcomes on 9 of 10 tickets, and the one difference is run-to-run LLM noise on a node v4 does not even change. In that 2026-05-18 run intent accuracy fell to 50–60% on real external text (vs ~70% hand-curated) — but `false_auto_send_rate` held at 0% in both. Full write-up: [`eval/bitext_findings.md`](./eval/bitext_findings.md).
 
-**Honest caveat on `response_quality`.** The LLM-as-judge is the same provider+model family as the drafter (`gpt-4o-mini` judging `gpt-4o-mini` on OpenAI runs; same for DeepSeek-on-DeepSeek on prior OpenRouter runs). Same-family self-evaluation has known positive bias. `eval/cross_judge.py` partially mitigates by re-scoring with `gpt-4o`; a different-family judge (Claude / Gemini) would be a stronger signal — deferred until a non-OpenAI key is available. See [`eval/METHODOLOGY.md`](./eval/METHODOLOGY.md) "Judge bias".
+**Honest caveat on `response_quality`.** The LLM-as-judge is the same provider+model family as the drafter (`gpt-4o-mini` judging `gpt-4o-mini` on OpenAI runs; same for DeepSeek-on-DeepSeek on prior OpenRouter runs). Same-family self-evaluation has known positive bias. `eval/cross_judge.py` is scripted to re-score with `gpt-4o` and report Pearson `r` + quadratic-weighted Cohen's κ, but **the cross-judge run has not been executed against the latest results yet** — `eval/cross_judge_results.json` is the deferred artifact (run command in [`eval/METHODOLOGY.md`](./eval/METHODOLOGY.md) "Reproducing"). A fully different-family judge (Claude / Gemini) would be a stronger signal — deferred until a non-OpenAI key is available. See METHODOLOGY's "Judge bias" section.
 
 **Breadth eval — all 27 Bitext intents, the honest worst-case (2026-05-21).** The 10-intent eval was filtered to SaaS-mappable intents. The full 27-intent breadth eval — one ticket per intent, including out-of-domain e-commerce intents — is the harder test, and **both versions fail the primary safety metric** on it. v3 produces **6 dangerous false auto-sends** out of 27 (`false_auto_send_rate = 54.5%` of its 11 auto-sends). **v4 caught 5 of those 6**, reducing dangerous auto-sends to 1, but at the cost of 7 over-corrections (escalated drafts the user could have safely auto-sent). The one false auto-send v4 still misses (`registration_problems` classified as `FAQ`) is a classifier-confidently-wrong case the Critic architecturally cannot detect — it operates on the draft, not on the intent label. This is the multi-agent design's ceiling and the highest-EV target for the next round of work. Provider note: this run used **OpenAI `gpt-4o-mini`** after the OpenRouter free-tier credits ran out — new baseline, intentionally labeled. Full senior-architect write-up: [`eval/bitext27_findings.md`](./eval/bitext27_findings.md).
 
@@ -239,9 +248,10 @@ cp .env.example .env
 ### 1. Install + run tests
 
 ```bash
-pip install -r requirements.txt
-pytest                                # 148 / 148 should pass (v3+v4)
-python -m eval.run_experiments --no-llm   # routing eval (no creds needed)
+pip install -r requirements.txt          # runtime deps only
+pip install -e .[dev]                    # adds pytest/ruff/mypy/bandit/pip-audit
+pytest                                   # 148 / 148 should pass (v3+v4)
+python -m eval.run_experiments --no-llm  # routing eval (no creds needed)
 ```
 
 ### 2. Boot the service

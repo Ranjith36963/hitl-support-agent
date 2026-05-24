@@ -387,19 +387,21 @@ send_retry_count: int                # increments on each transient send failure
 
 ## LangSmith tagging
 
-Every trace is tagged with the following so the LangSmith UI supports failure-slice analysis:
+**Status: scoped, not yet emitted.** `src/llm.py:_ls_metadata` returns the intended tag dict, but no caller passes it to `@traceable` yet (every traceable currently sets only `name=` and `run_type=`). The 2026-05-24 audit caught the gap. Wiring is a one-commit follow-up: add `tags=_ls_metadata(state)` to each `@traceable` callsite and re-publish the README's failure-slice claim with real LangSmith screenshots backing it.
+
+The intended tag set when wired:
 
 | Tag | Values |
 |---|---|
-| `graph_version` | `v1` / `v2` / `v3` |
-| `intent` | `refund` / `billing` / `technical` / `complaint` / `FAQ` / `other` |
+| `graph_version` | `v3` / `v4` (`MULTIAGENT_ENABLED` flag, stamped at `graph_runner.startup()`) |
+| `intent` | `refund` / `billing` / `technical` / `complaint` / `FAQ` / `info` / `basic_technical` / `other` |
 | `outcome` | `auto_send` / `escalated` |
 | `human_edited` | `true` / `false` |
 | `final_state` | `sent` / `rejected` / `expired` / `cancelled` / `superseded` / `failed_manual` |
 | `risk_flags` | comma-joined list (e.g., `refund,angry`) |
 | `confidence_bucket` | `lt_0.5` / `0.5-0.85` / `gte_0.85` |
 
-These tags drive the README's failure-slice table — break down accuracy by `intent + risk_flags` and you see exactly where v1 → v2 → v3 improvements landed.
+Once these tags are emitted, the failure-slice table in the README — break down accuracy by `intent + risk_flags` — becomes reproducible from LangSmith. Until then, the README's slice numbers are sourced from the eval result JSONs only.
 
 ## Eval data
 

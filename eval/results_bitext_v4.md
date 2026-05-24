@@ -6,6 +6,8 @@
 
 _Generated: 2026-05-18T21:04:50.623697+00:00_
 
+**Reproduce:** `python -m eval.run_experiments --dataset bitext --multiagent`
+
 **Mode: real LLM (OpenRouter / DeepSeek V3)**
 
 ## Summary metrics

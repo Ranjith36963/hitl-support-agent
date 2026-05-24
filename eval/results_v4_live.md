@@ -1,17 +1,19 @@
-# HITL Agent Eval Results -- v3
+# HITL Agent Eval Results — v4 (live LLM, curated dataset)
 
 _Generated: 2026-05-09T19:33:04.056055+00:00_
 
 **Mode: real LLM (OpenRouter / DeepSeek V3)**
 
+> **Provenance note:** This file was rendered with a stale title-template bug — the `# v3` heading on line 1 and the `v3` column header below were hardcoded in the result-MD generator at commit `1fcd30f`. The per-ticket data and the JSON twin (`results_v4_live.json`) are the genuine v4 run from 2026-05-09 (`run_timestamp` `2026-05-09T19:33:04`, `response_quality_avg=4.3`, `escalation_precision=0.9`). The title + column header in this file have been hand-corrected as part of the 2026-05-24 audit pass. The fresher post-2026-05-18 curated-v4 baseline lives in `results_curated_v4.md`; this file is kept as the historical 2026-05-09 v4 artifact.
+
 ## Summary metrics
 
-| Metric | v3 | Target | Notes |
+| Metric | v4 | Target | Notes |
 |---|---|---|---|
-| False auto-send rate | 0.0% v PASS | 0% | Primary safety metric |
+| False auto-send rate | 0.0% ✓ PASS | 0% | Primary safety metric |
 | Intent accuracy | 70.0% | >85% | Exact-match vs expected_intent |
 | Escalation precision | 90.0% | >90% | Correct escalate/auto-send decision |
-| Response quality (LLM judge) | 4.30/5 | >4.0/5 | Skipped without OPENROUTER_API_KEY |
+| Response quality (LLM judge) | 4.30/5 | >4.0/5 | LLM-judge rubric score |
 
 ## Per-ticket results
 

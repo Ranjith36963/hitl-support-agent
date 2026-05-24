@@ -4,6 +4,8 @@ _Generated: 2026-05-18T21:22:17.569919+00:00_
 
 **Mode: real LLM (OpenRouter / DeepSeek V3)**
 
+**Reproduce:** `python -m eval.run_experiments --dataset curated --no-multiagent`
+
 ## Summary metrics
 
 | Metric | v3 | Target | Notes |

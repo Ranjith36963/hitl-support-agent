@@ -95,6 +95,22 @@ it has not yet been *seen* doing so in the wild.
   `data/bitext_eval_10.csv` so the run is reproducible.
 - Run live through **both** v3 (single-agent) and v4 (multi-agent).
 
+### Dataset attribution
+
+- **Source:** [`bitext/Bitext-customer-support-llm-chatbot-training-dataset`](https://huggingface.co/datasets/bitext/Bitext-customer-support-llm-chatbot-training-dataset) on Hugging Face.
+- **License:** CDLA-Sharing 1.0 (Community Data License Agreement — Sharing — Version 1.0). The dataset is permissively shareable; derivative works (including subsets like `data/bitext_eval_10.csv` and `data/bitext_eval_27.csv` in this repo) must retain the license and attribution.
+- **Citation:**
+  ```bibtex
+  @misc{bitext-customer-support-llm-chatbot-training-dataset,
+    author = {Bitext},
+    title  = {Bitext Customer Support LLM Chatbot Training Dataset},
+    year   = {2023},
+    publisher = {Hugging Face},
+    howpublished = {\url{https://huggingface.co/datasets/bitext/Bitext-customer-support-llm-chatbot-training-dataset}},
+  }
+  ```
+- **What's in this repo:** two CSV subsets (`data/bitext_eval_10.csv`, `data/bitext_eval_27.csv`) — small, deterministic selections used to evaluate the agent. No upstream Bitext labels are altered; we add `expected_intent`, `expected_outcome`, and `split` columns as hand-authored mapping judgements (the values are this project's annotations, not Bitext's).
+
 ### Honest scope (read before trusting the numbers)
 
 - Bitext is an **e-commerce / order-support** dataset. This project is a SaaS
