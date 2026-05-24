@@ -50,6 +50,7 @@ import os
 import re
 import sqlite3
 import threading
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -253,6 +254,57 @@ def get_envelope_from(ticket_id: str) -> str | None:
         if env:
             _ENVELOPE_VAULT[ticket_id] = env
         return env
+
+
+def resolve_customer_email(state: Any) -> str:
+    """Return the trustworthy customer email for *state*.
+
+    Single source of truth for recipient-address recovery — call this from
+    every node / agent that needs the customer email after PII redaction
+    has run. Three-tier lookup:
+
+      Tier 1 — `envelope_from` for `state["ticket_id"]` in the live or
+               persistent vault (the trustworthy SMTP envelope captured at
+               ingest; spoof-proof).
+      Tier 2 — first `[EMAIL_*]` entry in the live token_map for that
+               ticket (matches whatever the spoofable `From:` header said;
+               fallback when no envelope was captured, e.g. test fixtures).
+      Tier 3 — legacy compatibility — read the `pii_redact` audit_log entry
+               for an inline `token_map` dict. Covers checkpoints persisted
+               before the 2026-05-09 vault refactor (audit C1/C2 hardening).
+
+    Returns the sentinel `unknown@example.com` if no path resolves. The
+    Send Email node MUST treat this sentinel as "fail closed" — sending to
+    a stranger is worse than not sending at all (see `src/nodes.py:
+    send_email_node`'s `unknown_recipient` skip path).
+
+    Previously duplicated in `src/nodes.py` and `src/agents/researcher.py`;
+    DRY'd into `src/pii.py` on 2026-05-24 (audit Medium #15) so drift
+    between the two copies can't silently re-introduce the spoofed-
+    recipient bug.
+
+    Args:
+        state: AgentState (or any dict-like with `ticket_id` and
+               `audit_log` keys). Typed as `Any` to avoid a circular
+               import of `src.state.AgentState` from this leaf module.
+    """
+    ticket_id = state.get("ticket_id", "") if hasattr(state, "get") else ""
+    if ticket_id:
+        envelope = get_envelope_from(ticket_id)
+        if envelope:
+            return envelope
+        tm = get_token_map(ticket_id)
+        for token, original in tm.items():
+            if token.startswith("[EMAIL_"):
+                return original
+    audit_log = state.get("audit_log") if hasattr(state, "get") else None
+    for entry in reversed(audit_log or []):
+        if entry.get("node") == "pii_redact":
+            tm_legacy = entry.get("token_map") or {}
+            for token, original in tm_legacy.items():
+                if token.startswith("[EMAIL_"):
+                    return str(original)
+    return "unknown@example.com"
 
 
 def clear_ticket(ticket_id: str) -> None:

@@ -28,6 +28,15 @@ pip-audit --strict
 The runtime install (`pip install -r requirements.txt`) deliberately omits
 all of that so Docker images stay small.
 
+> **No lock file.** `requirements.txt` uses `>=` lower-bounds; no `uv.lock`
+> / `poetry.lock` / `requirements.lock` is committed. Transitive deps will
+> resolve to whatever's current on PyPI at install time, so the exact
+> dependency graph drifts across clones. Acceptable for a portfolio
+> project; if you hit a "works on my machine" issue, snapshot the
+> versions with `pip freeze > my-environment.txt` and attach to the
+> issue. A real lock file is a future enhancement once the project has
+> multiple contributors.
+
 ## Running the agent end-to-end
 
 ```bash

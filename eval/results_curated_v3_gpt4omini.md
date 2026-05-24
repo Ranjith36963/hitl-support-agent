@@ -1,8 +1,10 @@
-# HITL Agent Eval Results — v3 (curated dataset)
+# HITL Agent Eval Results — v3 (curated dataset, gpt-4o-mini)
 
 _Generated: 2026-05-21T19:52:42.016809+00:00_
 
-**Mode: real LLM (OpenRouter / DeepSeek V3)**
+**Mode: real LLM (OpenAI / `gpt-4o-mini`)** — the header was auto-generated with the stale hardcoded provider string (same generator bug fixed for bitext27 files). Actual run used OpenAI per `eval/bitext27_findings.md` §"Curated equivalence check": this is the in-domain sanity-check that ruled out provider drift as a confound for the breadth-set v3-vs-v4 comparison. The generator bug is fixed in `eval/run_experiments.py` for future runs.
+
+**Reproduce:** `LLM_PROVIDER=openai python -m eval.run_experiments --dataset curated --no-multiagent`
 
 ## Summary metrics
 

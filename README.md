@@ -84,6 +84,8 @@ inbound Gmail (IMAP IDLE)
 
 ## Eval results — v3 architecture, real LLM (DeepSeek V3)
 
+_Source: [`eval/results_curated_v3.json`](./eval/results_curated_v3.json) (v2 prompt column) + LangSmith trace history (v1 prompt column). 10 hand-curated tickets — see [`eval/dataset.py`](./eval/dataset.py)._
+
 | Metric | v1 prompt | v2 prompt (few-shot) | Target | Status |
 |---|---|---|---|---|
 | **False auto-send rate** | 0.0% | **0.0%** | 0% | ✅ **PASS** — held across iteration (primary safety metric) |
@@ -141,7 +143,7 @@ MULTIAGENT_ENABLED=0 python -m src.server  # v3 single-agent (comparison artifac
 
 ### v3 vs v4 metrics (10 hand-curated tickets, live DeepSeek V3 via OpenRouter)
 
-_Refreshed 2026-05-18 through the de-rigged harness — real KB retrieval, no injected policy matches._
+_Refreshed 2026-05-18 through the de-rigged harness — real KB retrieval, no injected policy matches. Sources: [`eval/results_curated_v3.json`](./eval/results_curated_v3.json) (v3 column) + [`eval/results_curated_v4.json`](./eval/results_curated_v4.json) (v4 column)._
 
 | Metric | v3 | v4 | Δ |
 |---|---|---|---|
@@ -216,6 +218,9 @@ See [`demo/v4_critic_intercept.md`](./demo/v4_critic_intercept.md) for the agent
 | **`test_drafter_critic_loop.py`** | **3** | **v4: loop cap = 3 iterations (up to two revision passes) even on infinite "revise"; respects accept verdict** |
 | **`test_v4_integration.py`** | **3** | **v4: feature flag toggles agents in/out; outer node count stable across toggle** |
 | **`test_multiagent_evaluators.py`** | **8** | **v4: 5 evaluators handle empty/typical/mismatch inputs** |
+| **`test_metrics.py`** | **12** | **observability: Prometheus singletons, `@timed_node` decorator, `_TEST_RESET` covers labeled + unlabeled metric reset patterns** |
+
+(Row counts are approximate — `pytest --collect-only` is the authoritative source. Total = 148 verified.)
 
 ## Failure modes handled (per `architecture.md`)
 
@@ -273,17 +278,33 @@ python -m eval.run_experiments         # uses OPENROUTER_API_KEY
 ## Folder map
 
 ```
-src/    state.py  graph.py  graph_runner.py  nodes.py  llm.py
-        config.py  policy.py  slack_router.py  pii.py
-        email_listener.py  slack_handler.py  mcp_client.py  server.py
+src/      state.py  graph.py  graph_runner.py  nodes.py  llm.py  metrics.py
+          config.py  policy.py  slack_router.py  pii.py
+          email_listener.py  slack_handler.py  mcp_client.py  server.py
+src/agents/  base.py  researcher.py  drafter.py  critic.py        # v4 multi-agent
 mcp_server/  support_read.py  support_email_write.py  support_slack_write.py
-data/   acme_policies.md  customers_seed.json
-eval/   dataset.py  evaluators.py  run_experiments.py  results.md  results.json
-tests/  test_policy.py  test_slack_router.py  test_pii.py  test_resume.py
-        test_slack_handler.py  test_integration_smoke.py  test_mcp_subprocess_boot.py
-        test_email_idempotency.py  test_critic_invariants.py  test_v4_integration.py
-        test_security_email_handling.py (and more — 148 total across both flag modes)
-docs/   architecture.md
+data/     acme_policies.md  customers_seed.json
+          bitext_eval_10.csv  bitext_eval_27.csv
+data/prompts/  classify_system.md  drafter_system.md  critic_system.md
+               researcher_system.md  summarize_system.md
+eval/     run_experiments.py  evaluators.py  dataset.py  bitext_dataset.py
+          adversarial_dataset.py  adversarial_evaluators.py  cross_judge.py
+          critic_intercept.py  stats.py
+          METHODOLOGY.md  bitext_findings.md  bitext27_findings.md  discussion.md
+          results_curated_{v3,v4}.{md,json}  results_bitext_{v3,v4}.{md,json}
+          results_bitext27_{v3,v4}.{md,json}  results_adversarial_{v3,v4}.{md,json}
+          results_v3_live.{md,json}  results_v4_live.{md,json}  results_v3_offline.{md,json}
+tests/    test_policy.py  test_slack_router.py  test_pii.py  test_resume.py
+          test_slack_handler.py  test_integration_smoke.py  test_mcp_subprocess_boot.py
+          test_email_idempotency.py  test_critic_invariants.py  test_v4_integration.py
+          test_v4_integration_smoke.py  test_security_email_handling.py
+          test_metrics.py  test_drafter_critic_loop.py
+          (148 total across both flag modes)
+docs/     architecture.md  threat_model.md  v4_multiagent.md  v3_completion_status.md
+deploy/   prometheus.yml  grafana/  README.md                   # docker-compose observability stack
+demo/     v4_critic_intercept.md                                # demo scripts (videos TBD)
+.github/  workflows/ci.yml  PULL_REQUEST_TEMPLATE.md  ISSUE_TEMPLATE/{bug_report,feature_request}.md
+scripts/  preflight_smoke.py                                    # credential pre-flight probe
 ```
 
 ## What's deferred (honest list)

@@ -66,7 +66,8 @@ flowchart TD
     Policy -->|risk detected| Router{Channel Router<br/>shipped: 2 priorities<br/>1.angry > 2.intent}:::decision
     Policy -->|no risk| Confidence{Confidence Check<br/>both confidences >= 0.85?}:::decision
     Confidence -->|below threshold| Router
-    Confidence -->|above threshold| Finalize
+    Confidence -->|above threshold| AutoSendMarker[auto_send_marker<br/>stamps state for audit trail]:::node
+    AutoSendMarker --> Finalize
 
     Router -->|angry| ChCmp[#support-complaints]:::slack
     Router -->|intent=refund| ChRef[#support-refunds]:::slack
@@ -403,6 +404,21 @@ The intended tag set when wired:
 
 Once these tags are emitted, the failure-slice table in the README — break down accuracy by `intent + risk_flags` — becomes reproducible from LangSmith. Until then, the README's slice numbers are sourced from the eval result JSONs only.
 
+## Prometheus metrics (`/metrics` endpoint)
+
+Exposed by `src/metrics.py`. The FastAPI app mounts `prometheus_client.make_asgi_app()` at `/metrics/`; Prometheus scrapes it every 15s in the `docker-compose` stack (`deploy/prometheus.yml`). All six series render on the Grafana dashboard provisioned at `http://127.0.0.1:3000` (`deploy/grafana/dashboards/hitl-overview.json`).
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `hitl_tickets_total` | Counter | `intent`, `outcome` | One increment per ticket reaching a terminal state. `outcome` ∈ `{sent, escalated, manual_queue, failed_manual}`. |
+| `hitl_node_errors_total` | Counter | `node` | Exceptions raised inside a LangGraph node. Useful for alerting on a single node going hot. |
+| `hitl_llm_tokens_total` | Counter | `call`, `kind` | Cumulative tokens consumed per LLM call site. `call` ∈ `{classify, draft, drafter, critic, summarize_changes}`, `kind` ∈ `{prompt, completion}`. Backs cost telemetry without needing the LLM provider's own dashboard. |
+| `hitl_node_latency_seconds` | Histogram | `node` | Wall-clock latency of one LangGraph node call. Buckets tuned for an LLM-driven system (50 ms → 60 s). |
+| `hitl_ticket_e2e_seconds` | Histogram | — | Wall-clock from ticket entry to terminal state. Buckets span 0.5 s → 24 h (covers both auto-send fast paths and pause-for-human waits). |
+| `hitl_llm_latency_seconds` | Histogram | `call` | Wall-clock latency of one LLM call. Same call-site labels as `hitl_llm_tokens_total`. |
+
+The metric singletons are imported once; the `@timed_node("<name>")` decorator in `src/metrics.py` wraps every node function so latency + error metrics fire automatically. `_emit_terminal_metrics` in `src/graph_runner.py` fires `TICKETS_TOTAL` + `E2E_LATENCY` on each terminal state.
+
 ## Eval data
 
 The eval suite runs against **10 hand-curated tickets** — one per code path (`eval/dataset.py`), each exercising a distinct graph branch. A real 10-ticket Bitext eval has also been run (`eval/bitext_findings.md`, 10 of Bitext's 27 intents); a larger external sweep is future work. Five evaluators run via LangSmith:
@@ -463,7 +479,7 @@ flowchart TD
         DNode[drafter<br/>writes / rewrites draft<br/>picks up critic feedback if iter > 0]:::node
         CNode[critic<br/>LLM judge<br/>verdict + severity + feedback<br/>draft_confidence *= 1 - severity*0.5]:::node
         Route{revise AND<br/>iter &lt; MAX_CRITIC_ITERATIONS - 1?}:::decision
-        Loop[drafter_loop<br/>iteration++<br/>MAX = 2 hard cap]:::node
+        Loop[drafter_loop<br/>iteration++<br/>MAX_CRITIC_ITERATIONS = 3 hard cap]:::node
         DE([END]):::terminal
         DS --> DNode --> CNode --> Route
         Route -->|yes| Loop --> DNode

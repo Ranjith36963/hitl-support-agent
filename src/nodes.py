@@ -51,14 +51,14 @@ from src.pii import (
     clear_ticket as _pii_clear_ticket,
 )
 from src.pii import (
-    get_envelope_from as _pii_envelope_from,
-)
-from src.pii import (
     get_token_map as _pii_get_token_map,
 )
 from src.pii import (
     redact,
     restore,
+)
+from src.pii import (
+    resolve_customer_email as _pii_resolve_customer_email,
 )
 from src.pii import (
     store_token_map as _pii_store_token_map,
@@ -317,41 +317,13 @@ async def enrich_context_node(state: AgentState) -> dict[str, Any]:
 def _customer_email_from_audit(state: AgentState) -> str:
     """Recover the customer email after PII redact replaced it.
 
-    Two-tier lookup, trustworthy first:
-      1. SMTP envelope-from in the pii vault (captured from Return-Path
-         by email_listener — NOT spoofable by message content).
-      2. First [EMAIL_*] in the redacted token_map (matches whatever
-         the From: header said — spoofable; only used when envelope is
-         absent, e.g., test fixtures or non-IMAP entry points).
-
-    Returns 'unknown@example.com' if neither path resolves — this sentinel
-    address means the recipient is unknown; downstream Send Email MUST
-    refuse rather than silently substituting it. (Audit caller should fail
-    closed.)
-
-    Compatibility shim: legacy state where token_map was stored inline in
-    the audit_log entry still resolves correctly so checkpoints persisted
-    before this fix continue to work after the upgrade.
+    Thin wrapper around `src.pii.resolve_customer_email` — kept under the
+    old name so existing call sites in this module don't need to change.
+    See `src.pii.resolve_customer_email` for the three-tier lookup, the
+    `unknown@example.com` fail-closed sentinel, and the legacy audit_log
+    compat path. DRY'd into pii.py on 2026-05-24 (audit Medium #15).
     """
-    ticket_id = state.get("ticket_id", "")
-    # Tier 1: trustworthy envelope-from
-    if ticket_id:
-        envelope = _pii_envelope_from(ticket_id)
-        if envelope:
-            return envelope
-        tm = _pii_get_token_map(ticket_id)
-        for token, original in tm.items():
-            if token.startswith("[EMAIL_"):
-                return original
-    # Tier 2: legacy compatibility — read from audit_log if vault is empty
-    # (covers checkpointed state from before this fix).
-    for entry in reversed(state.get("audit_log") or []):
-        if entry.get("node") == "pii_redact":
-            tm_legacy = entry.get("token_map") or {}
-            for token, original in tm_legacy.items():
-                if token.startswith("[EMAIL_"):
-                    return str(original)
-    return "unknown@example.com"
+    return _pii_resolve_customer_email(state)
 
 
 # ---------------------------------------------------------------------------

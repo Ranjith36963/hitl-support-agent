@@ -15,8 +15,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 # Load .env into os.environ BEFORE any src.* import. pydantic-settings reads
@@ -92,13 +94,65 @@ app.mount("/metrics", make_asgi_app())
 
 
 @app.get("/health")
-async def health() -> dict[str, Any]:
-    return {
-        "status": "ok",
+async def health() -> Any:  # dict[str, Any] for 200 paths; JSONResponse for 503
+    """Liveness + readiness probe.
+
+    Returns `{"status": "ok"}` only when every readiness check passes;
+    `{"status": "degraded"}` with a non-empty `degraded_checks` list when
+    a downstream is reachable-but-impaired; `{"status": "down"}` with a
+    non-200 HTTP code (503) when a hard prerequisite is missing.
+
+    Checks (cheap — must complete in well under 1 s so the docker
+    healthcheck interval of 15 s leaves headroom):
+
+      - `graph_compiled` — LangGraph builder + AsyncSqliteSaver are
+        initialised. Hard requirement.
+      - `mcp_router_started` — the 3 MCP subprocesses (read / email /
+        slack) were spawned. Hard requirement.
+      - `checkpointer_writable` — the SQLite file underlying the
+        AsyncSqliteSaver is on a writable path. Soft: log a warning if
+        the file is missing (will be created lazily on first write).
+      - `slack_configured`, `gmail_configured` — surface-level config
+        presence (was the only thing the prior `/health` did).
+    """
+    checks: dict[str, bool] = {
+        "graph_compiled": graph_runner._graph is not None,
+        "mcp_router_started": graph_runner._router is not None,
         "slack_configured": bool(settings.slack_bot_token),
         "gmail_configured": bool(settings.gmail_user),
-        "graph": "compiled" if graph_runner._graph is not None else "uninitialized",
     }
+
+    # Soft check: SQLite checkpoint file location is writable.
+    checkpointer_writable = True
+    try:
+        db_dir = Path(settings.sqlite_checkpoint_path).parent
+        db_dir.mkdir(parents=True, exist_ok=True)
+        checkpointer_writable = os.access(db_dir, os.W_OK)
+    except OSError:
+        checkpointer_writable = False
+    checks["checkpointer_writable"] = checkpointer_writable
+
+    # Hard requirements (block readiness if any fails).
+    hard = ("graph_compiled", "mcp_router_started")
+    failed_hard = [k for k in hard if not checks[k]]
+    degraded = [k for k, ok in checks.items() if not ok and k not in hard]
+
+    if failed_hard:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "down",
+                "failed_checks": failed_hard,
+                "checks": checks,
+            },
+        )
+    if degraded:
+        return {
+            "status": "degraded",
+            "degraded_checks": degraded,
+            "checks": checks,
+        }
+    return {"status": "ok", "checks": checks}
 
 
 # ---------------------------------------------------------------------------

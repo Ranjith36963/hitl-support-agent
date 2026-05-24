@@ -43,32 +43,15 @@ def _client() -> Any:
 
 
 def _customer_email_from_audit(state: AgentState) -> str:
-    """Recover the customer email — vault first, audit_log fallback.
-
-    Mirrors `src.nodes._customer_email_from_audit` two-tier lookup. v4
-    Researcher must use the same trustworthy envelope-from path to avoid
-    re-introducing the spoofed-recipient bug audit C1 closed.
+    """Thin wrapper around `src.pii.resolve_customer_email` — kept under
+    the old name so existing call sites in this module don't need to
+    change. See pii.py for the three-tier lookup, the
+    `unknown@example.com` fail-closed sentinel, and the legacy audit_log
+    compat path. DRY'd into pii.py on 2026-05-24 (audit Medium #15).
     """
-    from src.pii import get_envelope_from, get_token_map
+    from src.pii import resolve_customer_email
 
-    ticket_id = state.get("ticket_id", "")
-    if ticket_id:
-        envelope = get_envelope_from(ticket_id)
-        if envelope:
-            return envelope
-        tm = get_token_map(ticket_id)
-        for token, original in tm.items():
-            if token.startswith("[EMAIL_"):
-                return original
-    # Legacy compat: tests + checkpoints written before the vault refactor
-    # still feed token_map via audit_log. Drop after a few weeks.
-    for entry in reversed(state.get("audit_log") or []):
-        if entry.get("node") == "pii_redact":
-            tm_legacy = entry.get("token_map") or {}
-            for token, original in tm_legacy.items():
-                if token.startswith("[EMAIL_"):
-                    return str(original)
-    return "unknown@example.com"
+    return resolve_customer_email(state)
 
 
 def _hash_context(payload: Any) -> str:

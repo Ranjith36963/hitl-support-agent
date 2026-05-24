@@ -93,17 +93,30 @@ The shipped router is a **3-channel build** (`#support-refunds`, `#support-techn
 
 `AgentState` TypedDict — required keys include `ticket_id`/`thread_id`, `email_thread_id`, `customer_tier`, `risk_level`, `policy_matches`, `slack_channel`, `slack_message_ts`, `send_idempotency_key`, `sent_message_id`, `human_rejection_count`, `rejection_reason`, `send_retry_count`, `context_hash`, `original_draft`/`final_draft`, `approval_status`, `send_status`, `final_state`, cost/token fields, `audit_log` (append-only).
 
-## Folder layout (v3 target)
+## Folder layout (current — v3 + v4 + observability + sidecar all shipped)
 
 ```
-src/    state.py  graph.py  nodes.py  llm.py  policy.py  slack_router.py
-        pii.py    email_listener.py   slack_handler.py   mcp_client.py   server.py
+src/         state.py  graph.py  graph_runner.py  nodes.py  llm.py  metrics.py
+             config.py  policy.py  slack_router.py  pii.py
+             email_listener.py  slack_handler.py  mcp_client.py  server.py
+src/agents/  base.py  researcher.py  drafter.py  critic.py   # v4 multi-agent
 mcp_server/  support_read.py  support_email_write.py  support_slack_write.py
-data/   acme_policies.md  customers_seed.json  prompts/
-eval/   dataset.py  evaluators.py  run_experiments.py
-ui/     (empty — edit.html fallback was scoped but not built; Slack modal is the only edit path)
-tests/  test_policy.py  test_slack_router.py  test_pii.py  test_resume.py  test_email_idempotency.py
-        test_slack_handler.py  test_critic_invariants.py  test_v4_integration.py  (and more — 148 total)
+data/        acme_policies.md  customers_seed.json
+             bitext_eval_10.csv  bitext_eval_27.csv  prompts/
+eval/        run_experiments.py  evaluators.py  dataset.py  bitext_dataset.py
+             adversarial_dataset.py  adversarial_evaluators.py  cross_judge.py
+             critic_intercept.py  stats.py
+             METHODOLOGY.md  bitext_findings.md  bitext27_findings.md  discussion.md
+ui/          (empty — edit.html fallback was scoped but not built; Slack modal is the only edit path)
+tests/       (148 total — test_policy, test_slack_router, test_pii, test_resume,
+             test_email_idempotency, test_slack_handler, test_critic_invariants,
+             test_v4_integration, test_v4_integration_smoke, test_metrics,
+             test_drafter_critic_loop, test_mcp_subprocess_boot, test_integration_smoke,
+             test_security_email_handling, ...)
+docs/        architecture.md  threat_model.md  v4_multiagent.md  v3_completion_status.md
+deploy/      prometheus.yml  grafana/  README.md   # docker-compose observability stack
+demo/        v4_critic_intercept.md               # demo scripts (videos TBD)
+scripts/     preflight_smoke.py                   # credential pre-flight probe
 ```
 
 ## Env vars (see `.env.example`)
