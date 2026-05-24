@@ -147,6 +147,21 @@ def gate_one_policy_risk(state: AgentState) -> bool:
         _set_risk_level(state, "compliance")
         escalate = True
 
+    # --- Check 6: Classifier-supplied legal / compliance risk_flags ---
+    # If the classifier (or upstream enrichment) tagged the ticket as legal or
+    # compliance — e.g. classifier read "lawyer", "FTC", "GDPR", "subpoena" —
+    # respect that signal as a Gate 1 trip. Without this, a ticket whose only
+    # risk signal is the classifier's `risk_flags` array would slip into
+    # Gate 2 and could auto-send on a high-confidence draft. The threat model
+    # row A2 names this as the gate's purpose; this check makes it real.
+    existing_flags: list[str] = state.get("risk_flags") or []
+    if "legal" in existing_flags:
+        _set_risk_level(state, "legal")
+        escalate = True
+    if "compliance" in existing_flags:
+        _set_risk_level(state, "compliance")
+        escalate = True
+
     return escalate
 
 

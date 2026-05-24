@@ -2,7 +2,7 @@
 
 _Generated: 2026-05-21T19:41:31.584711+00:00_
 
-**Mode: real LLM (OpenRouter / DeepSeek V3)**
+**Mode: real LLM (OpenAI / `gpt-4o-mini`)** — header was auto-generated with a stale hardcoded provider string; the actual run used OpenAI per `eval/bitext27_findings.md` §"Scope & provenance" (`LLM_PROVIDER=openai`). The generator bug is fixed in `eval/run_experiments.py` for future runs.
 
 ## Summary metrics
 

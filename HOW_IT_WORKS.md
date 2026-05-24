@@ -10,7 +10,9 @@ The runtime decomposes into seven layers (see `docs/architecture.md` for the tab
 
 ## Setup (one-time, before any tickets)
 
-You have a Gmail account `support@yourcompany.com` with IMAP enabled and an App Password. You have a Slack workspace with six channels: `#support-refunds`, `#support-technical`, `#support-billing`, `#support-complaints`, `#support-enterprise`, `#support-legal`. Your team is in those channels. The agent is running.
+You have a Gmail account `support@yourcompany.com` with IMAP enabled and an App Password. You have a Slack workspace with **three channels** for this build: `#support-refunds`, `#support-technical`, `#support-complaints`. Your team is in those channels. The agent is running.
+
+(The spec describes six channels including `#support-billing`, `#support-enterprise`, `#support-legal` with a 4-priority router. That scope was cut to 3 channels for the 6-10h build — see the "Cut from spec" section at the bottom and `src/slack_router.py` docstring. Adding the deferred channels is a config-only change once you decide to.)
 
 ---
 
@@ -71,13 +73,13 @@ Deterministic rules check the retrieved policies + risk_flags. ACME Policy 4.2.1
 
 ## Step 8 — Channel Router picks the right Slack channel
 
-Priority-ordered overrides run (lexicographic — higher priority wins on conflict):
-1. **Legal/compliance?** No.
-2. **Enterprise + risk?** Jamie is `tier=Standard`, so no.
-3. **Angry sentiment?** No (sentiment was neutral).
-4. **By intent?** **Yes** → `intent=refund` → **`#support-refunds`**.
+The shipped router has two priorities (first match wins):
+1. **Angry sentiment?** No (sentiment was neutral) — would have gone to `#support-complaints` if yes.
+2. **By intent?** **Yes** → `intent=refund` → **`#support-refunds`**.
 
 `slack_channel="#support-refunds"` saved to state.
+
+> *(The spec's full 4-priority chain — `legal/compliance > Enterprise+risk > angry > intent` — is deferred per `src/slack_router.py` docstring. In this build, anything that isn't `refund` or `angry` lands in `#support-technical` as the catch-all.)*
 
 ## Step 9 — Slack Notification posts (BEFORE interrupt — order matters)
 
@@ -197,20 +199,22 @@ She has no idea an agent drafted it, a router picked the channel, ACME 4.2.1 was
 
 ---
 
-## The same flow, but Jamie is angry and Enterprise
+## The same flow, but Jamie is angry
 
 Imagine instead Jamie wrote: *"This is the third time. I'm furious. I want my money back NOW or I'm calling my lawyer."*
 
-Steps 1–7 same shape. But the classifier returns `sentiment=angry (0.94), risk_flags=["refund","angry","legal"], risk_level=legal`. CRM lookup says `tier=Enterprise`.
+Steps 1–7 same shape. The classifier returns `sentiment=angry (0.94), risk_flags=["refund","angry","money_mention"], risk_level=financial`.
 
 **Channel Router** runs through priorities:
-1. **Legal/compliance? YES** (`risk_flags` contains `legal`). Channel = **`#support-legal`**.
+1. **Angry sentiment? YES.** Channel = **`#support-complaints`**.
 
-(Even though she's Enterprise, even though she's angry, even though it's a refund — *legal wins*. That's the priority order doing real work.)
+(Even though it's a refund — *angry wins*. The angry-sentiment override is the priority order doing real work. In the shipped 3-channel build, `#support-complaints` is where escalations with hot emotional content land so your most experienced responders can de-escalate before substance.)
 
-The Slack post lands in `#support-legal` with all the same panels but routed to your legal-savvy responders. They see the lawyer mention upfront, handle it appropriately, and either approve a careful response or reject it for an attorney to handle directly.
+The Slack post lands in `#support-complaints` with all the same panels — risk_flags, sentiment, customer history, the draft, the policy quote — but in a channel watched by senior support staff. They see the lawyer mention upfront, handle it appropriately, and either approve a careful response or reject it back to the agent for a calmer redraft (the Critic on revision will lean conservative).
 
 Jamie still gets a reply via real email, threaded under her original. She's still treated like she emailed a competent company. The internal routing is invisible to her — but it's the difference between a portfolio project and a real product.
+
+> *(The spec's 4-priority chain would have routed this to `#support-legal` because of the "lawyer" mention. That route is deferred — see `src/slack_router.py` docstring. Adding it back is a config-only change: add the constant, add the priority check above angry, no graph changes.)*
 
 ---
 
@@ -286,7 +290,7 @@ Jamie's refund ticket arrives at what used to be `enrich_context_node`. In v4 it
 
 ### Step 6 becomes the Drafter ↔ Critic loop
 
-What used to be a single LLM call is now a tight two-agent sub-graph. The **Drafter Agent** writes draft v1 with a `draft_confidence` score, exactly the v3 shape. Then the **Critic Agent** takes over: it reads the draft alongside the policy quotes the Researcher pulled, and emits a verdict — `accept` or `revise` — with a severity score and feedback string. If the verdict is `accept`, the loop exits and draft v1 flows into Gate 1 unchanged. If the verdict is `revise` and we're still on iteration 0, the Drafter rewrites with the Critic's feedback in the prompt, the Critic audits draft v2, and the loop exits regardless — **a hard cap of 2 iterations, no infinite loops**. The Critic's severity score is wired into draft confidence as `draft_confidence *= (1 - severity * 0.5)` — meaning the Critic can only *lower* confidence, never raise it. And on a malformed JSON response from the Critic, the system fails safe: verdict defaults to `revise` with severity 0.5, escalating to a human rather than silently passing through.
+What used to be a single LLM call is now a tight two-agent sub-graph. The **Drafter Agent** writes draft v1 with a `draft_confidence` score, exactly the v3 shape. Then the **Critic Agent** takes over: it reads the draft alongside the policy quotes the Researcher pulled, and emits a verdict — `accept` or `revise` — with a severity score and feedback string. If the verdict is `accept`, the loop exits and the current draft flows into Gate 1 unchanged. If the verdict is `revise` and we're still on iteration 0 or 1, the Drafter rewrites with the Critic's feedback in the prompt and the Critic audits the new draft. The loop is bounded by `MAX_CRITIC_ITERATIONS = 3`: up to 3 total Drafter calls, up to 2 revision passes, then a hard exit regardless of verdict — **no infinite loops**. The Critic's severity score is wired into draft confidence as `draft_confidence *= (1 - severity * 0.5)` — meaning the Critic can only *lower* confidence, never raise it. And on a malformed JSON response from the Critic, the system fails safe: verdict defaults to `revise` with severity 0.5, escalating to a human rather than silently passing through.
 
 ### What this looked like under live eval
 

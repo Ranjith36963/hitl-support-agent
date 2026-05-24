@@ -55,8 +55,8 @@ the LLM is consumed as an API), and end-user mail-client security.
 ## STRIDE threats per asset
 
 The "Existing mitigation" column points to real files. If a row's mitigation
-is empty or marked "**MISSING**", that's a real production gap — track in
-`PRODUCTION_READINESS.md`.
+is empty or marked "**MISSING**", that's a real production gap — tracked in
+the residual-risk register at the bottom of this file.
 
 ### A1 — Customer email body (PII, untrusted content)
 
@@ -71,7 +71,7 @@ is empty or marked "**MISSING**", that's a real production gap — track in
 
 | Threat | Type | Existing mitigation | Residual risk | Honest gap |
 |---|---|---|---|---|
-| False auto-send (unsafe content auto-sent) | **Tampering / Elevation** | Two-gate routing in `src/policy.py`: Gate 1 = policy risk (refund/money/legal/angry/edge-intent escalate); Gate 2 = confidence floor (intent + draft < 0.85 escalate). 136+ tests including `test_policy.py` cover gate behaviour. Primary safety metric `false_auto_send_rate == 0` is **measured by eval, not yet enforced by CI** (gate is in METHODOLOGY.md's Limitations list). | **HIGH** — bitext27_test and adversarial sets show non-zero failure rate. See `eval/bitext27_findings.md`. | Architectural ceiling: Critic operates on (draft, customer_message), cannot detect classifier-confidently-wrong. A Classifier-Critic is the highest-EV next step (see plan: rippling-soaring-sutherland.md). |
+| False auto-send (unsafe content auto-sent) | **Tampering / Elevation** | Two-gate routing in `src/policy.py`: Gate 1 = policy risk (refund/money/legal/angry/edge-intent escalate); Gate 2 = confidence floor (intent + draft < 0.85 escalate). 148 tests including `test_policy.py` cover gate behaviour. Primary safety metric `false_auto_send_rate == 0` is **measured by eval, not yet enforced by CI** (gate is in METHODOLOGY.md's Limitations list). | **HIGH** — bitext27_test and adversarial sets show non-zero failure rate. See `eval/bitext27_findings.md`. | Architectural ceiling: Critic operates on (draft, customer_message), cannot detect classifier-confidently-wrong. A Classifier-Critic is the highest-EV next step (tracked as a future enhancement; not yet on the roadmap). |
 | Send to wrong recipient (cross-ticket leak) | Information disclosure | `src/pii.py:get_envelope_from(ticket_id)` recovers the envelope-from from a separate vault; `src/nodes._customer_email_from_audit` uses vault first, audit_log fallback. Audit C1 closed this exact bug. | Low — vault is keyed on ticket_id. | Vault is in-process memory by default. Opt-in persistent sidecar via `PII_VAULT_DB_PATH` (added 2026-05-24 to support kill-mid-interrupt durable execution) puts envelope_from + token_map in a local SQLite file — encrypt the data dir or restrict ACL when enabled. Multi-worker deploys still need an external store (Redis) — **MISSING** for horizontal scale. |
 | Duplicate send (idempotency failure) | Integrity / Availability | `src/nodes.py:send_email_node` checks `sent_message_id` in AgentState before SMTP. SMTP retries don't dedupe at the protocol level — we own this. Tested in `tests/test_email_idempotency.py` (6 tests). | Low. | The `send_idempotency_key` is per-ticket; a re-injection of the same ticket_id with mutated body would not retrigger dedupe. Address via content-hash dedupe. |
 | Echo of attacker-controlled HTML in reply | Tampering | `eval/adversarial_evaluators._check_no_injected_text` with `forbidden_strings` covering `<script>`, `onerror=`, etc. Adversarial `adv-pa-04` passes on v3+v4. | Low — the LLM does not by default round-trip raw HTML. | The check is a regression detector; a creative model could rephrase HTML in plain text. Real fix: HTML-strip the outbound body before SMTP — **MISSING**. |
@@ -156,10 +156,9 @@ In rough priority order (highest residual first):
 8. **EU AI Act + GDPR Art. 22 compliance docs** — neither shipped.
 
 Each of these is honest engineering work that an enterprise security
-reviewer would expect to see tracked, NOT silently absent. The
-production-readiness checklist in `PRODUCTION_READINESS.md` (forthcoming —
-or referenced in the plan `rippling-soaring-sutherland.md`) covers the
-non-security side of the same gap analysis.
+reviewer would expect to see tracked, NOT silently absent. They are
+captured here in the threat-model residual-risk register rather than
+a separate production-readiness checklist — single source of truth.
 
 ---
 

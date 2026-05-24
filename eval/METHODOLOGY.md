@@ -24,7 +24,7 @@
 
 ### Layer 1 — Behavior contracts (`tests/`)
 
-136 passing tests at the time of writing (`pytest -q`). Notable invariant
+148 passing tests at the time of writing (`pytest -q`). Notable invariant
 tests:
 
 - [`tests/test_critic_invariants.py`](../tests/test_critic_invariants.py)
@@ -184,8 +184,8 @@ A senior reviewer should expect these gaps to be named explicitly. We do
 ### Production-eval gaps (the rest)
 
 - No production shadow-mode evaluation (agent running alongside human
-  approvers for N weeks, outcomes compared) — see
-  `PRODUCTION_READINESS.md` (forthcoming) for the full enterprise-eval gap.
+  approvers for N weeks, outcomes compared). See `docs/threat_model.md`
+  residual-risk register for the full enterprise-eval gap.
 - No cost-weighted safety metric. All `false_auto_send` failures are
   treated equally; in reality a refund auto-send is more expensive than a
   password-reset auto-send.

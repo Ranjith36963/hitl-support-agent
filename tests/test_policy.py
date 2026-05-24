@@ -501,6 +501,43 @@ def test_should_not_auto_send_policy_match():
 # Gate ordering: Gate 2 only runs if Gate 1 passes
 # ---------------------------------------------------------------------------
 
+def test_gate1_legal_risk_flag_escalates():
+    """A classifier-supplied `legal` flag must trip Gate 1 even when the
+    rest of the ticket looks benign (no money words, neutral sentiment).
+
+    Without this check, a high-confidence draft about a "I'm contacting my
+    lawyer" ticket could slip Gate 1 → into Gate 2 → and auto-send if the
+    classifier was confident. The threat model A2 row depends on this gate
+    catching it.
+    """
+    state = make_state(
+        intent="FAQ",
+        sentiment="neutral",
+        customer_message="Quick question about your terms.",
+        intent_confidence=0.95,
+        draft_confidence=0.92,
+        risk_flags=["legal"],
+        policy_matches=[],
+    )
+    assert gate_one_policy_risk(state) is True
+    assert state["risk_level"] == "legal"
+
+
+def test_gate1_compliance_risk_flag_escalates():
+    """A classifier-supplied `compliance` flag must trip Gate 1."""
+    state = make_state(
+        intent="info",
+        sentiment="neutral",
+        customer_message="What does your privacy policy say about data export?",
+        intent_confidence=0.95,
+        draft_confidence=0.92,
+        risk_flags=["compliance"],
+        policy_matches=[],
+    )
+    assert gate_one_policy_risk(state) is True
+    assert state["risk_level"] == "compliance"
+
+
 def test_gate2_not_run_when_gate1_fails():
     """
     When Gate 1 fails (risk detected), should_auto_send is False regardless

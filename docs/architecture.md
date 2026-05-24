@@ -63,20 +63,18 @@ flowchart TD
     Enrich --> Draft[Draft Response]:::node
     Draft --> Policy{Policy Risk Check<br/>refund / angry / ACME policy match?}:::decision
 
-    Policy -->|risk detected| Router{Channel Router<br/>priority overrides:<br/>1.legal > 2.enterprise+risk<br/>3.angry > 4.intent}:::decision
+    Policy -->|risk detected| Router{Channel Router<br/>shipped: 2 priorities<br/>1.angry > 2.intent}:::decision
     Policy -->|no risk| Confidence{Confidence Check<br/>both confidences >= 0.85?}:::decision
     Confidence -->|below threshold| Router
     Confidence -->|above threshold| Finalize
 
-    Router -->|legal/compliance| ChLegal[#support-legal]:::slack
-    Router -->|enterprise + risk| ChEnt[#support-enterprise]:::slack
     Router -->|angry| ChCmp[#support-complaints]:::slack
-    Router -->|by intent| ChIntent[#support-refunds /<br/>-technical / -billing]:::slack
+    Router -->|intent=refund| ChRef[#support-refunds]:::slack
+    Router -->|other intents| ChTech[#support-technical<br/>catch-all]:::slack
 
-    ChLegal --> SlackPost
-    ChEnt --> SlackPost
     ChCmp --> SlackPost
-    ChIntent --> SlackPost
+    ChRef --> SlackPost
+    ChTech --> SlackPost
     SlackPost[Slack Notification<br/>posts Block Kit message<br/>saves slack_message_ts<br/>NO interrupt yet]:::ui
 
     SlackPost --> Interrupt[Interrupt Gate<br/>dedicated node — only interrupt&#40;&#41;<br/>checkpointer persists at super-step<br/>resumes via webhook]:::hitl
@@ -126,7 +124,7 @@ flowchart TD
 - **Real email is the customer-facing I/O.** Gmail IMAP IDLE (sub-second push) preferred; 30s polling as fallback. Gmail SMTP delivers replies threaded under the original — requires `In-Reply-To` AND `References` headers AND a matching `Subject: Re: ...` (Gmail uses all three). Production swap → SendGrid/SES is an MCP server change, no graph logic change.
 - **Real Slack is the internal team I/O.** No web dashboard humans need to remember to check. Approvals live in the channel they already work in. Edit opens a Slack modal via `views.open` (not a redirect to a separate web UI) — keeps the human in Slack throughout.
 - **Slack webhook signatures are verified, not trusted.** The FastAPI handler computes HMAC-SHA256 of `v0:{X-Slack-Request-Timestamp}:{raw body}` with the signing secret, compares to `X-Slack-Signature`, and rejects if mismatch or timestamp older than 5 minutes (replay defense). Without this, anyone who finds the webhook URL can fake an Approve.
-- **Channel routing is priority-ordered, not fuzzy.** `legal/compliance > enterprise+risk > angry > by-intent`. Documented in `slack_router.py` and unit-tested. Enterprise customers never get triaged in the Free-tier queue.
+- **Channel routing is priority-ordered, not fuzzy.** Shipped build: `angry > by-intent` over 3 channels (`#support-complaints`, `#support-refunds`, `#support-technical` catch-all). The spec adds `legal/compliance > Enterprise+risk` above those — deferred per `adviserplan.md` scope, config-only to add. `slack_router.py`'s docstring is the source of truth; tests cover the shipped behaviour.
 - **Policy and confidence are separate gates.** A high-confidence refund still escalates. Order matters: policy first, confidence second — fast-fail on the cheaper check.
 - **Policies are real data, not hardcoded thresholds.** `data/acme_policies.md` is a fictional but rigorous policy corpus for ACME SaaS Co. The Policy Risk Check retrieves matching policy chunks via MCP and quotes them verbatim in the Slack approval. Production swap → company's actual policy docs in the same MCP shape.
 - **Revalidation threshold (15 min) is a tunable engineering decision, not a magic number.** Sub-15min: customer state rarely changes meaningfully. Over 15min: meaningful chance of CRM updates (subscription change, new ticket, billing event). Threshold is config-driven and tunable per tenant. When `context_hash` changed during a long pause, `Summarize Changes` posts a delta `update_message` on the same Slack thread (not a silent redraft) so the approver re-decides with full info.
@@ -184,7 +182,7 @@ Every failure has an explicit handling path. None are silent.
 | Yellow rounded | Email entry/exit (real Gmail in/out) |
 | Yellow diamond | Decision / router |
 | Red | HITL pause boundary |
-| Light purple | Slack channel (one of `#support-legal/-enterprise/-complaints/-refunds/-technical/-billing`) |
+| Light purple | Slack channel — shipped build uses 3: `#support-complaints` / `#support-refunds` / `#support-technical`. Spec's `#support-legal`, `#support-enterprise`, `#support-billing` are config-only additions deferred per `adviserplan.md`. |
 | Orange | Slack notification block (the message with Approve/Edit/Reject) |
 | Cyan | MCP **Read** server (`get_crm_profile`, `get_customer_history`, `get_kb_article`) |
 | Pink | MCP **Email Write** server (Gmail SMTP `send_email`) |
@@ -420,9 +418,9 @@ The eval suite runs against **10 hand-curated tickets** — one per code path (`
 | PII redact + restore middleware | `src/pii.py` |
 | Classify, Enrich Context, Draft, Summarize Changes, Finalize, Audit nodes | `src/nodes.py` |
 | Policy + Confidence routing, rejection-count guard | `src/policy.py` |
-| Channel Router with priority overrides (legal > enterprise+risk > angry > intent) | `src/slack_router.py` |
+| Channel Router with priority overrides (shipped: angry > intent over 3 channels; legal/Enterprise tiers deferred per `adviserplan.md`) | `src/slack_router.py` |
 | Interrupt + checkpointer wiring | `src/graph.py` |
-| FastAPI server + Slack webhook signature verification + edit modal fallback | `src/server.py` + `src/slack_handler.py` + `ui/edit.html` |
+| FastAPI server + Slack webhook signature verification + edit modal | `src/server.py` + `src/slack_handler.py` (Slack `views.open` modal — `ui/edit.html` web fallback was scoped but not built) |
 | MCP **Read** server (CRM + KB) | `mcp_server/support_read.py` |
 | MCP **Email Write** server (Gmail SMTP, idempotent) | `mcp_server/support_email_write.py` |
 | MCP **Slack Write** server (post / update / views.open) | `mcp_server/support_slack_write.py` |

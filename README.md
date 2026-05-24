@@ -2,7 +2,7 @@
 
 > Production-grade Human-in-the-Loop customer support agent with durable execution, multi-channel Slack approval routing, three capability-isolated MCP servers, and real Gmail I/O. Built on LangGraph + LangSmith.
 
-**Status:** v3 architecture shipped end-to-end (87 / 87 v3 tests passing). **v4 multi-agent layer (Researcher + Drafter ↔ Critic) shipped behind `MULTIAGENT_ENABLED` flag** — 31 additional v4 tests passing including 6 Critic-invariant tests (one of which proves escalate-on-uncertainty for malformed LLM JSON) and 3 v4 integration smokes. **Total: 118 / 118 tests passing in both `MULTIAGENT_ENABLED=0` and `=1` modes.** **Live LLM eval complete** — both v3 and v4 hold `false_auto_send_rate = 0%` against 10 hand-curated tickets via DeepSeek V3 on OpenRouter. v4 Critic flipped 1 ticket from auto_send → escalated (Gate 2 threshold tightening) — full numbers in the [v4 section](#v4--multi-agent-iteration). Demo recordings remain user-action items.
+**Status:** v3 architecture shipped end-to-end. **v4 multi-agent layer (Researcher + Drafter ↔ Critic) shipped behind `MULTIAGENT_ENABLED` flag** (default `1` since 2026-05-23 — see CLAUDE.md). **Total: 148 / 148 tests passing in both `MULTIAGENT_ENABLED=0` and `=1` modes** (including 6 Critic-invariant tests, 3 v4 integration smokes, 3 PII vault sidecar tests). **Live LLM eval complete** — both v3 and v4 hold `false_auto_send_rate = 0%` against 10 hand-curated tickets via DeepSeek V3 on OpenRouter; on the 27-intent Bitext breadth set both currently fail safety (v3=54.5%, v4=50% of auto-sends wrong; absolute count fell 6 → 1 — full numbers in `eval/bitext27_findings.md`). v4 Critic flipped 1 ticket from auto_send → escalated (Gate 2 threshold tightening) on the curated set — see the [v4 section](#v4--multi-agent-iteration). Demo recordings remain user-action items.
 
 ---
 
@@ -47,7 +47,7 @@ inbound Gmail (IMAP IDLE)
 ## Differentiators (vs typical portfolio HITL projects)
 
 1. **Real Gmail IMAP+SMTP**, not mocked — IDLE primary with 30s poll fallback, three threading headers (`In-Reply-To` + `References` + `Subject: Re:`)
-2. **Real Slack with priority-ordered channel routing** — `legal/compliance > enterprise+risk > angry > by-intent` (3 channels in this build, 6 documented; channel set is config)
+2. **Real Slack with priority-ordered channel routing** — shipped as a 3-channel build (`#support-refunds`, `#support-technical`, `#support-complaints`) where `angry` sentiment overrides intent; `#support-legal`, `#support-enterprise`, `#support-billing` are config-only additions deferred from this build's scope (see `src/slack_router.py` docstring)
 3. **Three custom MCP servers with capability separation** — Read cannot Send, Email Write cannot Slack, Slack Write cannot email; bounded blast radius for prompt injection
 4. **Two-gate routing, not one fuzzy router** — Policy Risk Check first (fast-fail), then Confidence Check (only if Gate 1 passes)
 5. **`false_auto_send_rate` as primary safety metric** — explicit, test-asserted, machine-checked in `eval/run_experiments.py`
@@ -128,7 +128,7 @@ MULTIAGENT_ENABLED=1 python -m src.server  # v4 multi-agent
 MULTIAGENT_ENABLED=0 python -m src.server  # v3 single-agent (comparison artifact — see below)
 ```
 
-> **Honest framing on v3 path:** v3 is retained as the **comparison artifact** for the v3-vs-v4 iteration story above, **not** as a "production rollback" — this is a portfolio build with no live traffic, so calling it production-rollback would be cosplay. **Both paths stay.** The head-to-head found v4 does **not** beat v3 — they tie — so `MULTIAGENT_ENABLED=0` (v3, the simpler path) stays the default. The A/B comparison *is* the deliverable; the honest tie is the result. See `src/graph.py` next to the flag, and `discussion.md` for the full audit.
+> **Honest framing on v3 path:** v3 is retained as the **comparison artifact** for the v3-vs-v4 iteration story above, **not** as a "production rollback" — this is a portfolio build with no live traffic, so calling it production-rollback would be cosplay. **Both paths stay.** The 10-ticket curated + 10-ticket Bitext head-to-head tied; the later 27-intent Bitext breadth eval + 25-ticket adversarial set showed **v4 catches 5/6 dangerous false auto-sends v3 missed** and 3 more classifier-trap cases — that's why the default **flipped to `MULTIAGENT_ENABLED=1` (v4) on 2026-05-23**. Trade-off: v4 ~2× cost/ticket and over-escalates some simple FAQs. Set `=0` to recover the v3 single-agent baseline for direct comparison. See `src/graph.py:174-198` for the full history block, `eval/bitext27_findings.md` for the evidence, and `discussion.md` for the earlier (pre-flip) audit.
 
 ### v3 vs v4 metrics (10 hand-curated tickets, live DeepSeek V3 via OpenRouter)
 
@@ -187,7 +187,7 @@ Compares `tool_selection_precision` (does the cheaper model still pick the right
 
 See [`demo/v4_critic_intercept.md`](./demo/v4_critic_intercept.md) for the agent-to-agent self-correction demo script.
 
-## Test coverage — 136 / 136
+## Test coverage — 148 / 148
 
 | Suite | Count | What it proves |
 |---|---:|---|
@@ -240,7 +240,7 @@ cp .env.example .env
 
 ```bash
 pip install -r requirements.txt
-pytest                                # 136 / 136 should pass (v3+v4)
+pytest                                # 148 / 148 should pass (v3+v4)
 python -m eval.run_experiments --no-llm   # routing eval (no creds needed)
 ```
 
@@ -269,9 +269,10 @@ src/    state.py  graph.py  graph_runner.py  nodes.py  llm.py
 mcp_server/  support_read.py  support_email_write.py  support_slack_write.py
 data/   acme_policies.md  customers_seed.json
 eval/   dataset.py  evaluators.py  run_experiments.py  results.md  results.json
-tests/  test_state.py  test_policy.py  test_slack_router.py  test_pii.py
-        test_resume.py  test_slack_handler.py  test_integration_smoke.py
-        test_mcp_subprocess_boot.py
+tests/  test_policy.py  test_slack_router.py  test_pii.py  test_resume.py
+        test_slack_handler.py  test_integration_smoke.py  test_mcp_subprocess_boot.py
+        test_email_idempotency.py  test_critic_invariants.py  test_v4_integration.py
+        test_security_email_handling.py (and more — 148 total across both flag modes)
 docs/   architecture.md
 ```
 

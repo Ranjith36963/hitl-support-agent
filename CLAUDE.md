@@ -8,7 +8,7 @@
 - Toggle: `MULTIAGENT_ENABLED=1` enables v4 (**default since 2026-05-23**). `=0` keeps v3 path for direct comparison.
 - **Both paths retained intentionally** — the v3↔v4 head-to-head IS the deliverable. On the 10-ticket curated + 10-ticket Bitext eval sets v3 and v4 tied; on the 27-intent breadth eval and 25-ticket adversarial set **v4 caught 5/6 dangerous false auto-sends v3 missed** and 3 more classifier_trap cases — that's what drove the default flip. Trade-off: v4 ~2× cost/ticket and over-escalates some simple FAQs. Full audit in `eval/bitext27_findings.md` + `discussion.md`.
 - Live LLM eval results: both modes hold `false_auto_send_rate = 0%` on the 10-ticket curated + 10-ticket Bitext sets. Both FAIL safety on bitext27 (v3=54.5%, v4=50% of auto-sends wrong — small denominator; absolute count fell 6 → 1).
-- Tests: 143/143 passing in both flag modes. CI green on every PR.
+- Tests: 148/148 passing in both flag modes. CI green on every PR.
 
 ## Source docs
 
@@ -45,7 +45,7 @@ Agent-first, human-on-demand customer support agent. **Real Gmail** in/out (IMAP
 | Observability | **LangSmith** (every step traced; tag set in `architecture.md`) |
 | Customer I/O | **Real Gmail** — IMAP IDLE in / SMTP out, threaded replies |
 | Approval channel | **Real Slack** — Bolt SDK; Socket Mode in dev, webhook+HMAC in prod |
-| Edit modal | Slack `views.open` (web fallback `ui/edit.html`) |
+| Edit modal | Slack `views.open` modal (Socket Mode dev / webhook prod). Web fallback `ui/edit.html` was scoped but not built — modal is sufficient and the spec keeps the human in Slack throughout. |
 | Tools | **Three MCP servers** — Read / Email Write / Slack Write |
 | Policy corpus | `data/acme_policies.md` (fictional, RAG-retrieved) |
 | Backend | FastAPI |
@@ -66,10 +66,12 @@ Auto-send path skips from Confidence Check straight to Finalize.
 
 ## Channel router priority (in `src/slack_router.py`) — higher wins on conflict
 
-1. `risk_flags` contains `legal` or `compliance` → `#support-legal`
-2. `customer_tier == Enterprise` AND any `risk_flags` → `#support-enterprise`
-3. `sentiment == angry` → `#support-complaints`
-4. by `intent` → `#support-{refunds, technical, billing}`
+The shipped router is a **3-channel build** (`#support-refunds`, `#support-technical`, `#support-complaints`). Two priorities, first match wins:
+
+1. `sentiment == angry` → `#support-complaints` (overrides everything)
+2. by `intent` → `#support-refunds` (refund) · `#support-technical` (technical/basic_technical/info, plus catch-all for billing/complaint/FAQ/other)
+
+**Deferred (config-only addition, not implemented):** `#support-legal`, `#support-enterprise`, `#support-billing`. The spec describes a 4-priority chain with `legal/compliance > Enterprise+risk > angry > intent`, but the 6-10h build scoped to 3 channels per `adviserplan.md`. `src/slack_router.py`'s docstring is the source of truth for the current behaviour.
 
 ## Implementation rules (NON-NEGOTIABLE — silent failures otherwise)
 
@@ -99,8 +101,9 @@ src/    state.py  graph.py  nodes.py  llm.py  policy.py  slack_router.py
 mcp_server/  support_read.py  support_email_write.py  support_slack_write.py
 data/   acme_policies.md  customers_seed.json  prompts/
 eval/   dataset.py  evaluators.py  run_experiments.py
-ui/     edit.html         (Slack Edit fallback — modal preferred)
-tests/  test_state.py  test_policy.py  test_slack_router.py  test_pii.py  test_resume.py
+ui/     (empty — edit.html fallback was scoped but not built; Slack modal is the only edit path)
+tests/  test_policy.py  test_slack_router.py  test_pii.py  test_resume.py  test_email_idempotency.py
+        test_slack_handler.py  test_critic_invariants.py  test_v4_integration.py  (and more — 148 total)
 ```
 
 ## Env vars (see `.env.example`)

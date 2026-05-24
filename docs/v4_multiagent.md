@@ -95,10 +95,10 @@ Email → pii_redact → classify_intent → [Researcher Agent] → [Drafter Age
 
 - Tools: `check_grounding`, `check_factuality`, `check_tone` (lightweight rule-based + LLM-judge hybrid)
 - Reads draft + retrieved policy quotes; emits `verdict ∈ {accept, revise}` + `feedback: str` + `severity ∈ [0,1]`.
-- If `verdict == revise` AND iteration < 2 → loop back to Drafter with feedback in prompt.
+- If `verdict == revise` AND `iteration < MAX_CRITIC_ITERATIONS - 1` (= `< 2` with the current cap of 3) → loop back to Drafter with feedback in prompt. Loops at iterations 0 and 1; exits at iteration 2.
 - Else → exit sub-graph with final draft.
 - Critic severity → `draft_confidence` adjustment: `draft_confidence *= (1 - severity * 0.5)`.
-- **Hard cap: 3 iterations** (up to 2 revision passes). No infinite loops.
+- **Hard cap: `MAX_CRITIC_ITERATIONS = 3`** — at most 3 Drafter calls / 2 revision passes / 3 Critic audits per ticket. No infinite loops. Asserted in `tests/test_drafter_critic_loop.py`.
 
 ## LangSmith observability — handoff metadata schema
 
