@@ -51,4 +51,4 @@ If you can't get the Drafter to fail naturally on any of your 10 eval tickets, t
 After recording:
 - Upload the video (Loom / YouTube / direct mp4 in `demo/recordings/`)
 - Add link in `README.md` v4 section
-- Cross-link `docs/v4_multiagent.md` for architecture, `docs/v3_completion_status.md` for v3 baseline
+- Cross-link `docs/v4_multiagent.md` for architecture

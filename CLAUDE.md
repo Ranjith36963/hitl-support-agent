@@ -15,10 +15,9 @@
 | Doc | When to open it |
 |---|---|
 | `spec.md` | Build spec — scope, sign-off, full state schema (§5), implementation rules (§6.5), v4 amendment (§21) |
-| `docs/architecture.md` | Diagrams, env-var table, sequence, state machine, codebase map, LangSmith tag table — includes v4 sub-graph section |
+| `docs/architecture.md` | Diagrams, key design points, failure modes, env-var table, codebase map, observability — v4 lives in `docs/v4_multiagent.md` |
 | `HOW_IT_WORKS.md` | End-to-end product narrative — Jamie example (v3) + "How v4 changes this story" appended |
 | `docs/v4_multiagent.md` | v4 spec amendment — architecture lock + hard invariants |
-| `docs/v3_completion_status.md` | Frozen v3 status snapshot taken the day v4 began |
 | `adviserplan.md` | v3 build plan (advisor-hardened 6-10h delegation plan) |
 
 ## Honesty rule (non-negotiable)
@@ -112,7 +111,7 @@ tests/       (148 total — test_policy, test_slack_router, test_pii, test_resum
              test_v4_integration, test_v4_integration_smoke, test_metrics,
              test_drafter_critic_loop, test_mcp_subprocess_boot, test_integration_smoke,
              test_security_email_handling, ...)
-docs/        architecture.md  threat_model.md  v4_multiagent.md  v3_completion_status.md
+docs/        architecture.md  threat_model.md  v4_multiagent.md  hitl-flow.png  generate_png.py
 deploy/      prometheus.yml  grafana/  README.md   # docker-compose observability stack
 demo/        v4_critic_intercept.md               # demo scripts (videos TBD)
 scripts/     preflight_smoke.py                   # credential pre-flight probe

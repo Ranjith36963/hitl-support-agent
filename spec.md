@@ -967,7 +967,6 @@ Ticket `eval-t07` is a `basic_technical` / `info` intent that v3 auto-sent at hi
 ### Cross-links
 
 - `docs/v4_multiagent.md` — full v4 architecture amendment, agent specs, handoff metadata schema, sign-off list
-- `docs/v3_completion_status.md` — v3 baseline frozen
 - `eval/results_v3_live.json`, `eval/results_v4_live.json` — raw eval artifacts (per-ticket audit logs)
 
 ### Deferred to v4.1

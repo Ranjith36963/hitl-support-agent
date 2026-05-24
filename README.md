@@ -290,7 +290,7 @@ tests/    test_policy.py  test_slack_router.py  test_pii.py  test_resume.py
           test_v4_integration_smoke.py  test_security_email_handling.py
           test_metrics.py  test_drafter_critic_loop.py
           (148 total across both flag modes)
-docs/     architecture.md  threat_model.md  v4_multiagent.md  v3_completion_status.md
+docs/     architecture.md  threat_model.md  v4_multiagent.md
 deploy/   prometheus.yml  grafana/  README.md                   # docker-compose observability stack
 demo/     v4_critic_intercept.md                                # demo scripts (videos TBD)
 .github/  workflows/ci.yml  PULL_REQUEST_TEMPLATE.md  ISSUE_TEMPLATE/{bug_report,feature_request}.md
@@ -312,10 +312,9 @@ scripts/  preflight_smoke.py                                    # credential pre
 | File | When to open |
 |---|---|
 | [`spec.md`](./spec.md) | Build spec — scope, sign-off criteria, full state schema (§5), implementation rules (§6.5) |
-| [`docs/architecture.md`](./docs/architecture.md) | Mermaid diagrams, env-var table, sequence, state machine, codebase map |
+| [`docs/architecture.md`](./docs/architecture.md) | Mermaid diagrams, key design points, failure modes, env-var table, codebase map, observability |
 | [`HOW_IT_WORKS.md`](./HOW_IT_WORKS.md) | End-to-end product narrative — paste into demo walk-throughs |
 | [`adviserplan.md`](./adviserplan.md) | v3 — the 6-10h delegation plan (advisor-hardened) |
-| [`docs/v3_completion_status.md`](./docs/v3_completion_status.md) | **v3 frozen status snapshot** — captured the day v4 began; phase % and gaps |
 | [`docs/v4_multiagent.md`](./docs/v4_multiagent.md) | **v4 spec amendment** — Researcher + Drafter↔Critic architecture lock + invariants |
 | [`eval/METHODOLOGY.md`](./eval/METHODOLOGY.md) | **Eval methodology** — three layers (contracts/empirical/adversarial), CIs, what's deferred |
 | [`docs/threat_model.md`](./docs/threat_model.md) | **STRIDE threat model** — asset list + per-threat existing mitigation + honest residual-risk register |
