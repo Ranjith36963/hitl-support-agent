@@ -30,6 +30,12 @@ services:
       # and serve /metrics + /health — the LLM endpoints will 401 until
       # keys are provided.
       MULTIAGENT_ENABLED: "${MULTIAGENT_ENABLED:-1}"
+      # Persistent PII sidecar — enables the "kill mid-interrupt + resume"
+      # durable-execution demo. Default opt-IN inside the container because
+      # the container ships next to its own writable volume; outside docker
+      # the host default stays empty (memory-only, C1/C2 hardening preserved).
+      # See docs/threat_model.md A1 for the on-disk PII trade-off.
+      PII_VAULT_DB_PATH: "${PII_VAULT_DB_PATH:-/app/data/pii_vault.sqlite}"
     # Short-form env_file works on Docker Compose v1+ (the long-form
     # `path:`/`required:` mapping needs Compose v2.24+ which not all distros
     # ship by default — ultrareview merged_bug_003). Compose prints a

@@ -219,3 +219,78 @@ def test_two_same_emails_plus_cc_plus_phone():
     assert "alice@example.com" not in redacted
     assert "4111 1111 1111 1111" not in redacted
     assert "(555) 867-5309" not in redacted
+
+
+# ---------------------------------------------------------------------------
+# Persistent PII vault sidecar (opt-in via PII_VAULT_DB_PATH)
+# Closes the durable-execution gap: a ticket paused at the Interrupt Gate
+# must still resolve the recipient address after the process is killed and
+# restarted, because the in-memory vault is empty in the fresh process.
+# ---------------------------------------------------------------------------
+
+
+def test_sidecar_disabled_by_default(monkeypatch, tmp_path):
+    """No env → memory-only behaviour, no SQLite file created.
+
+    Asserts C1/C2 hardening still holds for callers that have not opted in.
+    """
+    import src.pii as pii
+
+    monkeypatch.delenv("PII_VAULT_DB_PATH", raising=False)
+    monkeypatch.setattr(pii, "_TOKEN_VAULT", {}, raising=True)
+    monkeypatch.setattr(pii, "_ENVELOPE_VAULT", {}, raising=True)
+    pii._reset_sidecar_for_tests()
+
+    pii.store_envelope_from("ticket-x", "user@example.com")
+    assert pii.get_envelope_from("ticket-x") == "user@example.com"
+
+    # No file should appear next to the test's tmp_path because the env is unset.
+    assert not (tmp_path / "pii_vault.sqlite").exists()
+
+
+def test_sidecar_survives_simulated_process_restart(monkeypatch, tmp_path):
+    """With env set: writing then wiping the in-memory cache and re-opening
+    a new connection still recovers envelope_from + token_map.
+
+    Simulates the docker `compose stop` + `compose start` cycle that breaks
+    the in-memory vault — proves the sidecar fix actually fixes it.
+    """
+    import src.pii as pii
+
+    db_path = tmp_path / "pii_vault.sqlite"
+    monkeypatch.setenv("PII_VAULT_DB_PATH", str(db_path))
+    pii._reset_sidecar_for_tests()
+
+    # Process A: write
+    pii.store_envelope_from("ticket-y", "real-user@example.com")
+    pii.store_token_map("ticket-y", {"[EMAIL_1]": "real-user@example.com"})
+
+    # Simulate process death: drop in-memory caches AND close the connection.
+    pii._TOKEN_VAULT.clear()
+    pii._ENVELOPE_VAULT.clear()
+    pii._reset_sidecar_for_tests()
+
+    # Process B: cold read — must come back from disk.
+    assert pii.get_envelope_from("ticket-y") == "real-user@example.com"
+    assert pii.get_token_map("ticket-y") == {"[EMAIL_1]": "real-user@example.com"}
+
+
+def test_sidecar_clear_removes_disk_row(monkeypatch, tmp_path):
+    """clear_ticket must wipe both memory AND the sidecar — PII does not
+    linger past the ticket's lifetime even with the persistent vault on."""
+    import src.pii as pii
+
+    db_path = tmp_path / "pii_vault.sqlite"
+    monkeypatch.setenv("PII_VAULT_DB_PATH", str(db_path))
+    pii._reset_sidecar_for_tests()
+
+    pii.store_envelope_from("ticket-z", "leaver@example.com")
+    pii.clear_ticket("ticket-z")
+
+    # Hard reset to force a disk read; should now miss.
+    pii._TOKEN_VAULT.clear()
+    pii._ENVELOPE_VAULT.clear()
+    pii._reset_sidecar_for_tests()
+
+    assert pii.get_envelope_from("ticket-z") is None
+    assert pii.get_token_map("ticket-z") == {}

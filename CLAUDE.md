@@ -118,7 +118,7 @@ Secrets: `OPENROUTER_API_KEY` · `LANGSMITH_API_KEY` · `LANGSMITH_PROJECT` · `
 
 ## Three demo recordings required
 
-1. **Durable execution** — kill server mid-interrupt → restart → Slack approve → real email arrives.
+1. **Durable execution** — kill server mid-interrupt → restart → Slack approve → real email arrives. **Requires `PII_VAULT_DB_PATH` set** (opt-in persistent sidecar; default off preserves the 2026-05-09 C1/C2 in-memory-only PII hardening). `docker-compose.yml` opts in by default for the demo. Without the sidecar, resume cannot resolve the trustworthy recipient address and routes the ticket to `failed_manual` — bug found in the live smoke test 2026-05-24, fixed in `src/pii.py` + `src/config.py`; threat-model row A2 documents the trade-off.
 2. **Approve-with-edits** — Slack modal edit; audit log shows both drafts.
 3. **SLA timeout** — 24h no Slack response → auto-escalate to `manual_queue` + Slack notice.
 

@@ -27,33 +27,202 @@ Vault (added 2026-05-09 to close audit findings C1 + C2):
 - An additional `envelope_from` slot per ticket distinguishes the SMTP
   envelope sender (trustworthy, captured from Return-Path) from the RFC-822
   `From:` header (spoofable). Send Email uses envelope_from as the recipient.
+
+Persistent sidecar (added 2026-05-24, opt-in via `pii_vault_db_path`):
+- Default behaviour unchanged: vault lives only in process memory.
+- When `settings.pii_vault_db_path` is non-empty, vault writes through to a
+  sidecar SQLite file at that path AND reads from it on cache miss. This
+  lets a paused ticket survive process death (the "kill mid-interrupt +
+  resume" durable-execution demo).
+- Trade-off: real recipient addresses + redaction token-maps now sit on
+  disk in plaintext SQLite. Acceptable for the local docker demo (single
+  trust boundary). For prod, encrypt the data dir or move the vault behind
+  a KMS-fronted secret store. Documented in `docs/threat_model.md` A1.
+- LangSmith traces are NOT affected — only the local sidecar file. The
+  audit_log entries still carry only `token_count`, never the values.
 """
 
 from __future__ import annotations
 
+import json
+import logging
+import os
 import re
+import sqlite3
 import threading
+
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Ephemeral PII vault — module-level, NOT serialized to state, NOT checkpointed.
 # Keyed by ticket_id. Threading lock guards concurrent ticket processing.
+# Optional SQLite sidecar (see `_sidecar_*` helpers) persists the same data
+# when `PII_VAULT_DB_PATH` is set so paused tickets survive process death.
 # ---------------------------------------------------------------------------
 
 _TOKEN_VAULT: dict[str, dict[str, str]] = {}
 _ENVELOPE_VAULT: dict[str, str] = {}
 _VAULT_LOCK = threading.Lock()
 
+# Lazily-initialised SQLite connection for the persistent sidecar. None when
+# the feature is disabled (default). Single connection reused for the process
+# lifetime; sqlite3 is configured with check_same_thread=False because the
+# graph executes nodes on a worker thread distinct from where pii.py was
+# first imported.
+_SIDECAR_CONN: sqlite3.Connection | None = None
+_SIDECAR_INITED: bool = False
+
+
+def _sidecar_path() -> str:
+    """Resolve the sidecar SQLite path.
+
+    Env var wins so tests can `monkeypatch.setenv(...)` without having to
+    rebuild the (cached, import-time) Settings object. Falls back to
+    settings.pii_vault_db_path when the env var is unset — production path
+    reads it from .env via pydantic-settings.
+    """
+    env_value = os.environ.get("PII_VAULT_DB_PATH", "")
+    if env_value:
+        return env_value
+    try:
+        from src.config import settings
+
+        return settings.pii_vault_db_path
+    except Exception:  # noqa: BLE001 — never let config import crash pii ops
+        return ""
+
+
+def _sidecar() -> sqlite3.Connection | None:
+    """Return the persistent sidecar connection, opening it on first use.
+
+    Returns None when the feature is disabled (empty path). Callers MUST be
+    holding `_VAULT_LOCK` — the global state mutation here is not internally
+    synchronised.
+    """
+    global _SIDECAR_CONN, _SIDECAR_INITED
+    if _SIDECAR_INITED:
+        return _SIDECAR_CONN
+
+    path = _sidecar_path()
+    _SIDECAR_INITED = True
+    if not path:
+        _SIDECAR_CONN = None
+        return None
+
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        conn = sqlite3.connect(path, check_same_thread=False)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS pii_vault ("
+            "ticket_id TEXT PRIMARY KEY, "
+            "envelope_from TEXT, "
+            "token_map TEXT"
+            ")"
+        )
+        conn.commit()
+        _SIDECAR_CONN = conn
+        log.info("PII vault sidecar opened at %s", path)
+    except Exception as exc:  # noqa: BLE001 — disk failure must not crash send
+        log.warning("PII vault sidecar at %s failed to open: %s — falling back to memory-only", path, exc)
+        _SIDECAR_CONN = None
+    return _SIDECAR_CONN
+
+
+def _sidecar_put(ticket_id: str, *, envelope_from: str | None = None, token_map: dict[str, str] | None = None) -> None:
+    """Upsert a row in the sidecar. Either field optional → preserves the other.
+
+    No-op when the sidecar is disabled or its open failed. Caller MUST hold
+    `_VAULT_LOCK`.
+    """
+    conn = _sidecar()
+    if conn is None:
+        return
+    try:
+        cur = conn.execute("SELECT envelope_from, token_map FROM pii_vault WHERE ticket_id = ?", (ticket_id,))
+        existing = cur.fetchone()
+        new_env = envelope_from if envelope_from is not None else (existing[0] if existing else None)
+        new_tm = json.dumps(token_map) if token_map is not None else (existing[1] if existing else None)
+        conn.execute(
+            "INSERT INTO pii_vault (ticket_id, envelope_from, token_map) VALUES (?, ?, ?) "
+            "ON CONFLICT(ticket_id) DO UPDATE SET envelope_from=excluded.envelope_from, token_map=excluded.token_map",
+            (ticket_id, new_env, new_tm),
+        )
+        conn.commit()
+    except Exception as exc:  # noqa: BLE001 — sidecar errors must not crash the graph
+        log.warning("PII vault sidecar write failed for %s: %s", ticket_id, exc)
+
+
+def _sidecar_get(ticket_id: str) -> tuple[str | None, dict[str, str]]:
+    """Read (envelope_from, token_map) from the sidecar.
+
+    Returns (None, {}) when sidecar is disabled, absent, or read fails.
+    Caller MUST hold `_VAULT_LOCK`.
+    """
+    conn = _sidecar()
+    if conn is None:
+        return None, {}
+    try:
+        cur = conn.execute("SELECT envelope_from, token_map FROM pii_vault WHERE ticket_id = ?", (ticket_id,))
+        row = cur.fetchone()
+        if not row:
+            return None, {}
+        env = row[0]
+        tm: dict[str, str] = json.loads(row[1]) if row[1] else {}
+        return env, tm
+    except Exception as exc:  # noqa: BLE001
+        log.warning("PII vault sidecar read failed for %s: %s", ticket_id, exc)
+        return None, {}
+
+
+def _sidecar_delete(ticket_id: str) -> None:
+    """Drop the row for ticket_id from the sidecar. No-op when disabled."""
+    conn = _sidecar()
+    if conn is None:
+        return
+    try:
+        conn.execute("DELETE FROM pii_vault WHERE ticket_id = ?", (ticket_id,))
+        conn.commit()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("PII vault sidecar delete failed for %s: %s", ticket_id, exc)
+
+
+def _reset_sidecar_for_tests() -> None:
+    """Test-only: close and forget the cached sidecar connection so the next
+    call re-reads the env. NOT a public API."""
+    global _SIDECAR_CONN, _SIDECAR_INITED
+    if _SIDECAR_CONN is not None:
+        try:
+            _SIDECAR_CONN.close()
+        except Exception:  # noqa: BLE001
+            pass
+    _SIDECAR_CONN = None
+    _SIDECAR_INITED = False
+
 
 def store_token_map(ticket_id: str, token_map: dict[str, str]) -> None:
-    """Persist a token_map for ticket_id in the ephemeral vault."""
+    """Persist a token_map for ticket_id in the ephemeral vault.
+
+    Also writes through to the persistent sidecar when configured so resume
+    after process death can restore PII.
+    """
     with _VAULT_LOCK:
         _TOKEN_VAULT[ticket_id] = dict(token_map)
+        _sidecar_put(ticket_id, token_map=dict(token_map))
 
 
 def get_token_map(ticket_id: str) -> dict[str, str]:
-    """Retrieve the token_map for ticket_id (empty dict if absent)."""
+    """Retrieve the token_map for ticket_id (empty dict if absent).
+
+    Memory first; falls back to the persistent sidecar when configured. A
+    sidecar hit warms the memory cache so subsequent calls are zero-I/O.
+    """
     with _VAULT_LOCK:
-        return dict(_TOKEN_VAULT.get(ticket_id, {}))
+        if ticket_id in _TOKEN_VAULT:
+            return dict(_TOKEN_VAULT[ticket_id])
+        _, tm = _sidecar_get(ticket_id)
+        if tm:
+            _TOKEN_VAULT[ticket_id] = dict(tm)
+        return dict(tm)
 
 
 def store_envelope_from(ticket_id: str, envelope_from: str) -> None:
@@ -61,23 +230,39 @@ def store_envelope_from(ticket_id: str, envelope_from: str) -> None:
 
     This is the address Send Email uses as `to:`, NOT the spoofable
     RFC-822 `From:` header. Captured from `Return-Path` by the email
-    listener at ingest time.
+    listener at ingest time. Writes through to the persistent sidecar
+    when configured so the recipient survives process death.
     """
     with _VAULT_LOCK:
         _ENVELOPE_VAULT[ticket_id] = envelope_from
+        _sidecar_put(ticket_id, envelope_from=envelope_from)
 
 
 def get_envelope_from(ticket_id: str) -> str | None:
-    """Retrieve the SMTP envelope-from for ticket_id (None if absent)."""
+    """Retrieve the SMTP envelope-from for ticket_id (None if absent).
+
+    Memory first; falls back to the persistent sidecar when configured. A
+    sidecar hit warms the memory cache so subsequent calls are zero-I/O.
+    """
     with _VAULT_LOCK:
-        return _ENVELOPE_VAULT.get(ticket_id)
+        if ticket_id in _ENVELOPE_VAULT:
+            return _ENVELOPE_VAULT[ticket_id]
+        env, _ = _sidecar_get(ticket_id)
+        if env:
+            _ENVELOPE_VAULT[ticket_id] = env
+        return env
 
 
 def clear_ticket(ticket_id: str) -> None:
-    """Remove all PII vault entries for ticket_id. Call at terminal nodes."""
+    """Remove all PII vault entries for ticket_id. Call at terminal nodes.
+
+    Clears both the in-memory cache and the persistent sidecar (when
+    configured) so PII does not linger past the ticket's lifetime.
+    """
     with _VAULT_LOCK:
         _TOKEN_VAULT.pop(ticket_id, None)
         _ENVELOPE_VAULT.pop(ticket_id, None)
+        _sidecar_delete(ticket_id)
 
 # ---------------------------------------------------------------------------
 # Regex patterns (ordered most-specific first to avoid partial matches)

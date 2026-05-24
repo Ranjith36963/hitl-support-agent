@@ -54,6 +54,15 @@ class Settings(BaseSettings):
     # ---- Persistence ----
     sqlite_checkpoint_path: str = "./data/checkpoints.sqlite"
 
+    # ---- PII vault ----
+    # Empty → in-memory only (C1/C2 hardening: PII never on disk, never to
+    # LangSmith). Non-empty → SQLite sidecar at the given path persists
+    # envelope_from + token_map so a paused ticket can resume after process
+    # death. Required for the "kill-mid-interrupt + resume" demo. Opt-in:
+    # threat_model.md A1 documents the trade-off (recipient + redaction
+    # token-map now sit on disk; mitigate with disk encryption / SELinux).
+    pii_vault_db_path: str = ""
+
     # ---- Tunables (defaults match CLAUDE.md) ----
     revalidate_threshold_min: int = 15
     max_human_rejections: int = 3
