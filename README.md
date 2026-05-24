@@ -27,31 +27,11 @@ Enterprises deploy human-on-demand agents, not full autonomy. Audit trails, dura
 
 ## Architecture
 
-End-to-end product walkthrough: [`HOW_IT_WORKS.md`](./HOW_IT_WORKS.md).
-Mermaid diagrams + state schema + LangSmith tags: [`docs/architecture.md`](./docs/architecture.md).
-Build spec (sign-off criteria, failure modes, differentiators): [`spec.md`](./spec.md).
+The flow diagram above shows the v3 path top-to-bottom — email in → PII redact → classify → enrich → draft → two gates → either auto-send or pause for human on Slack → finalize → send → audit. **15 graph nodes, 5 conditional edges, 3 capability-isolated MCP servers** (Read · Email Write · Slack Write).
 
-```
-inbound Gmail (IMAP IDLE)
-  → PII Redact → Classify → Enrich (MCP Read: CRM + ACME KB)
-  → Draft → [Gate 1: policy risk] → [Gate 2: confidence + safe intent]
-                                        │
-              auto-send fast path  ←----+----→  escalate path
-                  ↓                                ↓
-              Finalize → Send (MCP Email)     Channel Router (3 channels)
-                                                   ↓
-                                        Slack Notification (MCP Slack)
-                                                   ↓
-                                          Interrupt Gate (DEDICATED)
-                                                   ↓
-                                       human Approve / Edit / Reject
-                                                   ↓
-                                  [Elapsed > 15min? → Revalidate Context]
-                                                   ↓
-                                        Finalize → Send → Audit Log
-```
-
-15 graph nodes, 5 conditional edges, 3 capability-isolated MCP servers (Read · Email Write · Slack Write).
+- End-to-end product walkthrough: [`HOW_IT_WORKS.md`](./HOW_IT_WORKS.md)
+- Mermaid diagrams (with v4 sub-graph), state schema, LangSmith tags, Prometheus metrics table: [`docs/architecture.md`](./docs/architecture.md)
+- Build spec (sign-off criteria, failure modes, differentiators): [`spec.md`](./spec.md)
 
 ## Differentiators (vs typical portfolio HITL projects)
 
@@ -75,7 +55,7 @@ inbound Gmail (IMAP IDLE)
 |---|---|
 | Orchestration | LangGraph + AsyncSqliteSaver checkpointer |
 | Observability | LangSmith (`@traceable` on every LLM call) |
-| LLM | OpenRouter — DeepSeek V3 free tier (single model) |
+| LLM | Provider-agnostic via `LLM_PROVIDER` env switch — **OpenRouter / DeepSeek V3** for the curated + 10-ticket Bitext runs (free tier), **OpenAI `gpt-4o-mini`** for the 27-intent breadth eval and the adversarial set (after OpenRouter free credits ran out). Both providers use the same OpenAI-compatible SDK in `src/llm.py`. |
 | Customer I/O | Real Gmail IMAP IDLE (in) + SMTP (out) |
 | Approval channel | Real Slack — Bolt SDK, Socket Mode in dev |
 | Tools | Three custom MCP servers via `mcp` Python SDK |
@@ -83,6 +63,8 @@ inbound Gmail (IMAP IDLE)
 | Eval | LangSmith evaluators + 10-ticket hand-curated dataset |
 
 ## Eval results — v3 architecture, real LLM (DeepSeek V3)
+
+> **Provider note (read once, applies to every eval below).** The earlier runs (curated 10-ticket + the first Bitext 10-ticket sets) used **OpenRouter's free DeepSeek V3** tier. The free credits ran out mid-project, so the later runs (the 27-intent Bitext breadth set and the 25-ticket adversarial set) were re-baselined on **OpenAI `gpt-4o-mini`**. Both providers run through the same OpenAI-compatible client (`src/llm.py`) — the swap is one env var (`LLM_PROVIDER=openrouter|openai`). Each results file's header names which provider it ran on; the table headings below repeat the provider so you never have to cross-reference. The provider switch was budget-driven, NOT a model-comparison experiment.
 
 _Source: [`eval/results_curated_v3.json`](./eval/results_curated_v3.json) (v2 prompt column) + LangSmith trace history (v1 prompt column). 10 hand-curated tickets — see [`eval/dataset.py`](./eval/dataset.py)._
 
@@ -242,7 +224,10 @@ See [`demo/v4_critic_intercept.md`](./demo/v4_critic_intercept.md) for the agent
 ```bash
 cp .env.example .env
 # Edit .env with:
-#   OPENROUTER_API_KEY     (https://openrouter.ai)
+#   LLM_PROVIDER           "openrouter" (default — uses DeepSeek V3 free tier)
+#                          or "openai"  (uses OPENAI_MODEL, default gpt-4o-mini)
+#   OPENROUTER_API_KEY     (https://openrouter.ai)         needed when LLM_PROVIDER=openrouter
+#   OPENAI_API_KEY         (https://platform.openai.com)   needed when LLM_PROVIDER=openai
 #   LANGSMITH_API_KEY      (https://smith.langchain.com)
 #   GMAIL_USER + GMAIL_APP_PASSWORD   (Gmail App Password, 2FA required)
 #   SLACK_BOT_TOKEN + SLACK_SIGNING_SECRET + SLACK_APP_TOKEN
@@ -271,8 +256,13 @@ python -m src.server
 ### 3. Run the full eval (with LLM)
 
 ```bash
-python -m eval.run_experiments         # uses OPENROUTER_API_KEY
-# Outputs eval/results.md and eval/results.json with real response_quality
+# Default — OpenRouter / DeepSeek V3 (free tier):
+python -m eval.run_experiments
+
+# OpenAI — used for the 27-intent breadth eval + adversarial set:
+LLM_PROVIDER=openai python -m eval.run_experiments --dataset bitext27 --multiagent
+
+# Outputs eval/results_*.{md,json} with real response_quality
 ```
 
 ## Folder map
