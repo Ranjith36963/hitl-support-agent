@@ -194,9 +194,30 @@ def _thread_id_from_body(body: dict[str, Any]) -> str:
 
 
 def _draft_from_body(body: dict[str, Any]) -> str:
+    """Recover the original draft text from the Slack approval message.
+
+    Two paths, tried in order:
+      1. message.metadata.event_payload.draft (if posted with metadata)
+      2. fallback: parse the *Draft reply* markdown section in the blocks,
+         which is how src.nodes._build_approval_blocks renders today.
+    Returning "" causes the Edit modal to open empty — the bug observed
+    in the 2026-05-25 live recording when only path (1) was supported.
+    """
     msg = body.get("message", {})
+
     metadata = msg.get("metadata", {}).get("event_payload", {})
-    return str(metadata.get("draft", ""))
+    if metadata.get("draft"):
+        return str(metadata["draft"])
+
+    prefix = "*Draft reply*\n```"
+    for block in msg.get("blocks", []):
+        text = block.get("text", {}).get("text", "")
+        if text.startswith(prefix):
+            inner = text[len(prefix):]
+            if inner.endswith("```"):
+                inner = inner[:-3]
+            return inner
+    return ""
 
 
 # ---------------------------------------------------------------------------

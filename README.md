@@ -9,6 +9,36 @@ A customer-support agent that drafts replies with an LLM but pauses for a human 
 
 ![End-to-end flow](docs/hitl-flow.png)
 
+## Watch it run
+
+[![Watch Part 1 — Live end-to-end](https://cdn.loom.com/sessions/thumbnails/1dcea3327a774699a705acf79eaab9d4-with-play.gif)](https://www.loom.com/share/1dcea3327a774699a705acf79eaab9d4)
+
+*Part 1 — Email arrives, agent drafts, human approves in Slack, reply lands in the customer's inbox (4 min)*
+
+[![Watch Part 2 — Observability](https://cdn.loom.com/sessions/thumbnails/c1d9a80faf3f453aa3447f525d34ff28-with-play.gif)](https://www.loom.com/share/c1d9a80faf3f453aa3447f525d34ff28)
+
+*Part 2 — Grafana dashboards + LangSmith trace tree showing the pause/resume pair (~2 min)*
+
+## See it in action
+
+Live screenshots from a real ticket processed by the v4 multi-agent path:
+
+**Slack approval card** — `risk_flags` fired (refund + money_mention + refund_intent), intent confidence scored, draft reply ready for human review with Approve / Edit / Reject buttons:
+
+![Slack approval card](docs/screenshots/slack-approval-card.png)
+
+**Grafana dashboard** — end-to-end ticket latency (p50 ~3s, p95 ~5s), per-call LLM latency, and token throughput split by call site. The drafter and critic dominating the bottom-right panel is the v4 multi-agent path lit up in real numbers — not slideware:
+
+![Grafana dashboard](docs/screenshots/grafana-dashboard.png)
+
+**LangSmith trace detail** — the full audit log of a single ticket. Visible: `_critic_verdict: revise` with the Critic's verbatim feedback, both `original_draft` and `final_draft` preserved (audit-log invariant), `customer_message` showing PII redacted to `[EMAIL_1]` token, real SMTP `sent_message_id`, idempotency key, SLA deadline, graph version `v4`, risk level `financial`:
+
+![LangSmith trace detail](docs/screenshots/langsmith-trace-detail.png)
+
+**LangSmith trace pair** — every ticket appears as two adjacent runs: the red marker is the pause (LangGraph's interrupt mechanism raising an exception by design — not a failure), the green is the resume that completes after the human clicks Approve:
+
+![LangSmith trace pairs](docs/screenshots/langsmith-trace-pairs.png)
+
 **Status:** v3 single-agent + v4 multi-agent (Researcher + Drafter↔Critic) both shipped behind `MULTIAGENT_ENABLED` flag (default `1` since 2026-05-23 — v4 caught 5/6 dangerous false auto-sends v3 missed on the 27-intent Bitext breadth set; see [`eval/bitext27_findings.md`](./eval/bitext27_findings.md)). **148 / 148 tests passing in both flag modes** (6 Critic-invariant tests, 3 v4 integration smokes, 3 PII vault sidecar tests). Live LLM eval: both versions hold `false_auto_send_rate = 0%` on 10 hand-curated + 10 Bitext tickets; on the 27-intent breadth set both currently fail safety (v3=54.5%, v4=50% of auto-sends wrong; absolute count fell 6 → 1). Demo recordings remain user-action items.
 
 **Looking for the high-trust artifacts?** Architecture: [`docs/architecture.md`](./docs/architecture.md) · Threat model: [`docs/threat_model.md`](./docs/threat_model.md) · Eval methodology: [`eval/METHODOLOGY.md`](./eval/METHODOLOGY.md) · Contributing: [`CONTRIBUTING.md`](./CONTRIBUTING.md) · Security disclosure: [`SECURITY.md`](./SECURITY.md).

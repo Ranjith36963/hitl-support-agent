@@ -4,6 +4,12 @@ apiVersion: 1
 
 datasources:
   - name: Prometheus
+    # Explicit UID — the dashboards/hitl-overview.json panels reference
+    # `"datasource": {"type": "prometheus", "uid": "prometheus"}`. Without
+    # this line Grafana auto-generates a random UID at provision time and
+    # every panel renders "No data" (silent mismatch). Bug surfaced in
+    # the 2026-05-25 live recording.
+    uid: prometheus
     type: prometheus
     access: proxy
     url: http://prometheus:9090
