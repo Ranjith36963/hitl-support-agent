@@ -246,3 +246,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Demo recording script — local-only, never publish
+demo/recording_script.md
